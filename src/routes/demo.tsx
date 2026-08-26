@@ -384,6 +384,7 @@ function DemoPage() {
       <AiCopilotModal
         isOpen={copilotOpen}
         onClose={() => setCopilotOpen(false)}
+        workspace={DEMO_WORKSPACE}
       />
     </div>
   );

@@ -47,11 +47,21 @@ const PRESET_PROMPTS = [
   },
 ];
 
-export function AiCopilotModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
-  const { data: ws } = useWorkspace();
+export function AiCopilotModal({
+  isOpen,
+  onClose,
+  workspace,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  workspace?: Workspace | null;
+}) {
+  const { data: hookWs } = useWorkspace();
+  const ws = workspace ?? hookWs;
   const [settings, setSettings] = useState<AISettings>(DEFAULT_AI_SETTINGS);
   const [showSettings, setShowSettings] = useState(false);
   const [tempProvider, setTempProvider] = useState<LLMProviderType>("builtin");
+  const [tempModel, setTempModel] = useState<string>("gemini-2.0-flash");
   const [customGeminiKey, setCustomGeminiKey] = useState<string>(() => {
     if (typeof window !== "undefined") {
       return localStorage.getItem("hacksync_gemini_key") || "";
@@ -209,21 +219,24 @@ I have direct access to your repository structure, database schema, and live int
           <div className="flex items-center gap-1.5">
             <button
               type="button"
-              onClick={() => {
+              data-testid="model-selector-btn"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
                 setTempProvider(settings.provider);
                 setTempModel(settings.model ?? "gemini-2.0-flash");
-                setShowSettings(!showSettings);
+                setShowSettings((prev) => !prev);
               }}
               title="Select AI Model"
               className={cn(
-                "flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors",
+                "flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold transition-colors shadow-sm cursor-pointer",
                 showSettings
                   ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                  : "bg-muted text-foreground hover:bg-accent hover:text-primary",
               )}
             >
               <Settings2 className="size-3.5" />
-              <span className="hidden sm:inline">Model</span>
+              <span>Model</span>
             </button>
 
             <button
@@ -247,81 +260,72 @@ I have direct access to your repository structure, database schema, and live int
 
         {/* AI Provider Settings Popover Drawer */}
         {showSettings ? (
-          <div className="border-b border-border bg-muted/90 p-4 text-xs space-y-3 animate-in fade-in slide-in-from-top-2">
+          <div className="border-b border-border bg-muted/95 p-4 text-xs space-y-3 animate-in fade-in slide-in-from-top-2">
             <div className="flex items-center justify-between">
               <span className="font-semibold text-foreground flex items-center gap-1.5">
-                <KeyRound className="size-3.5 text-primary" /> AI Model Selection (Server-Secured)
+                <KeyRound className="size-3.5 text-primary" /> AI Model Selection & Engine
               </span>
               <span className="text-[11px] text-muted-foreground">
-                Rate-limited server gateway
+                Select provider or enter API key
               </span>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              <label
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              <button
+                type="button"
+                onClick={() => setTempProvider("builtin")}
                 className={cn(
-                  "cursor-pointer rounded-lg border p-2.5 transition-all text-left",
+                  "cursor-pointer rounded-lg border p-3 transition-all text-left flex flex-col justify-between",
                   tempProvider === "builtin"
-                    ? "border-primary bg-primary/10 text-primary font-medium"
+                    ? "border-primary bg-primary/10 text-primary font-medium ring-1 ring-primary"
                     : "border-border bg-background hover:bg-accent text-muted-foreground",
                 )}
               >
-                <input
-                  type="radio"
-                  name="provider"
-                  className="sr-only"
-                  checked={tempProvider === "builtin"}
-                  onChange={() => setTempProvider("builtin")}
-                />
-                <div className="font-semibold">⚡ Built-in Expert</div>
-                <p className="text-[10px] opacity-80 mt-0.5">
+                <div className="font-semibold text-xs text-foreground flex items-center gap-1">
+                  ⚡ Built-in Expert
+                </div>
+                <p className="text-[10px] opacity-80 mt-1">
                   100% Offline & Private Deep Reasoning Engine
                 </p>
-              </label>
+              </button>
 
-              <label
+              <button
+                type="button"
+                onClick={() => {
+                  setTempProvider("gemini");
+                  setTempModel("gemini-2.0-flash");
+                }}
                 className={cn(
-                  "cursor-pointer rounded-lg border p-2.5 transition-all text-left",
+                  "cursor-pointer rounded-lg border p-3 transition-all text-left flex flex-col justify-between",
                   tempProvider === "gemini"
-                    ? "border-primary bg-primary/10 text-primary font-medium"
+                    ? "border-primary bg-primary/10 text-primary font-medium ring-1 ring-primary"
                     : "border-border bg-background hover:bg-accent text-muted-foreground",
                 )}
               >
-                <input
-                  type="radio"
-                  name="provider"
-                  className="sr-only"
-                  checked={tempProvider === "gemini"}
-                  onChange={() => {
-                    setTempProvider("gemini");
-                    setTempModel("gemini-2.0-flash");
-                  }}
-                />
-                <div className="font-semibold">✨ Google Gemini</div>
-                <p className="text-[10px] opacity-80 mt-0.5">Server Gateway (Gemini 2.0 Flash)</p>
-              </label>
+                <div className="font-semibold text-xs text-foreground flex items-center gap-1">
+                  ✨ Google Gemini
+                </div>
+                <p className="text-[10px] opacity-80 mt-1">Gemini 2.0 Flash (Fast Reasoning)</p>
+              </button>
 
-              <label
+              <button
+                type="button"
+                onClick={() => {
+                  setTempProvider("openai");
+                  setTempModel("gpt-4o-mini");
+                }}
                 className={cn(
-                  "cursor-pointer rounded-lg border p-2.5 transition-all text-left",
+                  "cursor-pointer rounded-lg border p-3 transition-all text-left flex flex-col justify-between",
                   tempProvider === "openai"
-                    ? "border-primary bg-primary/10 text-primary font-medium"
+                    ? "border-primary bg-primary/10 text-primary font-medium ring-1 ring-primary"
                     : "border-border bg-background hover:bg-accent text-muted-foreground",
                 )}
               >
-                <input
-                  type="radio"
-                  name="provider"
-                  className="sr-only"
-                  checked={tempProvider === "openai"}
-                  onChange={() => {
-                    setTempProvider("openai");
-                    setTempModel("gpt-4o-mini");
-                  }}
-                />
-                <div className="font-semibold">🤖 OpenAI GPT-4o</div>
-                <p className="text-[10px] opacity-80 mt-0.5">Server Gateway (GPT-4o Mini)</p>
-              </label>
+                <div className="font-semibold text-xs text-foreground flex items-center gap-1">
+                  🤖 OpenAI GPT-4o
+                </div>
+                <p className="text-[10px] opacity-80 mt-1">GPT-4o Mini (Advanced Coding)</p>
+              </button>
             </div>
 
             {tempProvider === "gemini" && (

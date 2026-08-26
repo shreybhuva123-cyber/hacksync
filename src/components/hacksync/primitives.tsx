@@ -290,19 +290,45 @@ export function EmptyState({
 }
 
 export function ErrorState({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  const isMissingTable =
+    message.toLowerCase().includes("schema cache") ||
+    message.toLowerCase().includes("does not exist") ||
+    message.toLowerCase().includes("public.projects");
+
   return (
-    <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-4">
-      <p className="text-sm font-medium text-destructive">Something went wrong</p>
-      <p className="mt-1 text-xs text-muted-foreground">{message}</p>
-      {onRetry ? (
-        <button
-          type="button"
-          onClick={onRetry}
-          className="mt-3 rounded-md border border-border bg-secondary px-3 py-1.5 text-xs font-medium hover:bg-accent"
-        >
-          Retry
-        </button>
-      ) : null}
+    <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-5">
+      <div className="flex items-center gap-2">
+        <p className="text-sm font-semibold text-destructive">
+          {isMissingTable ? "Database Schema Initialization Required" : "Something went wrong"}
+        </p>
+      </div>
+      <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
+        {isMissingTable
+          ? "Your Supabase project is connected, but the database tables have not been created yet in PostgreSQL. Run the SQL setup script in your Supabase SQL Editor to create all tables and RPC functions in 1 click."
+          : message}
+      </p>
+
+      <div className="mt-4 flex items-center gap-3 flex-wrap">
+        {isMissingTable ? (
+          <a
+            href="https://supabase.com/dashboard/project/qqyecjwhyjyryqykhcxa/sql"
+            target="_blank"
+            rel="noreferrer"
+            className="rounded-lg bg-primary px-3.5 py-1.5 text-xs font-semibold text-primary-foreground hover:opacity-90 transition-opacity shadow-sm flex items-center gap-1.5"
+          >
+            Open Supabase SQL Editor ↗
+          </a>
+        ) : null}
+        {onRetry ? (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="rounded-lg border border-border bg-secondary px-3.5 py-1.5 text-xs font-medium hover:bg-accent transition-colors"
+          >
+            Retry Connection
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }
