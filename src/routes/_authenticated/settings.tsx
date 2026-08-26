@@ -10,6 +10,7 @@ import {
   KeyRound,
   Check,
   ShieldCheck,
+  AlertCircle,
 } from "lucide-react";
 import { WorkspaceView } from "@/components/hacksync/WorkspaceView";
 import {
@@ -22,9 +23,11 @@ import {
 } from "@/components/hacksync/primitives";
 import { useAuth } from "@/hooks/useAuth";
 import { logActivity, useRowDelete, useRowInsert, useRowMutation } from "@/lib/hacksync/workspace";
+import { membersService } from "@/lib/services/members.service";
 import { DEFAULT_AI_SETTINGS, type AISettings, type LLMProviderType } from "@/lib/hacksync/llm-provider";
 import { canManageMembers, canDeleteProject } from "@/lib/hacksync/permissions";
-import type { Role, Workspace } from "@/lib/hacksync/types";
+import { ROLES, ROLE_CONFIG, type Role } from "@/lib/constants/roles";
+import type { Workspace } from "@/lib/hacksync/types";
 
 export const Route = createFileRoute("/_authenticated/settings")({
   head: () => ({
@@ -44,8 +47,6 @@ export const Route = createFileRoute("/_authenticated/settings")({
   component: SettingsPage,
 });
 
-const ROLES: Role[] = ["frontend", "backend", "database", "lead"];
-
 function SettingsPage() {
   return <WorkspaceView>{(ws) => <SettingsBody ws={ws} />}</WorkspaceView>;
 }
@@ -56,15 +57,21 @@ function SettingsBody({ ws }: { ws: Workspace }) {
   const insert = useRowInsert();
   const remove = useRowDelete();
 
+  // Find caller's role in this project
+  const callerMember = ws.members.find((m) => m.user_id === user?.id);
+  const callerRole: Role = callerMember?.role ?? (ws.project.created_by === user?.id ? "owner" : "member");
+
   // Add member form
   const [showAdd, setShowAdd] = useState(false);
   const [addName, setAddName] = useState("");
   const [addEmail, setAddEmail] = useState("");
   const [addRole, setAddRole] = useState<Role>("frontend");
   const [addError, setAddError] = useState<string | null>(null);
+  const [actionFeedback, setActionFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
   // Role editing state
   const [editingRole, setEditingRole] = useState<string | null>(null);
+  const [isUpdatingRole, setIsUpdatingRole] = useState(false);
 
   // AI Intelligence settings
   const [aiSettings, setAiSettings] = useState<AISettings>(DEFAULT_AI_SETTINGS);
@@ -90,37 +97,57 @@ function SettingsBody({ ws }: { ws: Workspace }) {
     );
   };
 
-  const changeRole = (memberId: string, newRole: Role) => {
-    update.mutate(
-      { table: "project_members", id: memberId, values: { role: newRole } },
-      {
-        onSuccess: () => {
-          setEditingRole(null);
-          const member = ws.members.find((m) => m.id === memberId);
-          void logActivity(
-            ws.project.id,
-            "settings",
-            `Changed ${member?.display_name ?? "member"}'s role to ${newRole}`,
-          );
-        },
-      },
-    );
+  const changeRole = async (memberId: string, newRole: Role) => {
+    try {
+      setIsUpdatingRole(true);
+      setActionFeedback(null);
+      await membersService.updateRole(memberId, newRole, callerRole);
+      setEditingRole(null);
+      const member = ws.members.find((m) => m.id === memberId);
+      setActionFeedback({
+        type: "success",
+        message: `Updated ${member?.display_name ?? "member"}'s role to ${newRole}`,
+      });
+      void logActivity(
+        ws.project.id,
+        "settings",
+        `Changed ${member?.display_name ?? "member"}'s role to ${newRole}`,
+      );
+      setTimeout(() => setActionFeedback(null), 3500);
+    } catch (err) {
+      setActionFeedback({
+        type: "error",
+        message: err instanceof Error ? err.message : "Failed to update member role.",
+      });
+      setTimeout(() => setActionFeedback(null), 5000);
+    } finally {
+      setIsUpdatingRole(false);
+    }
   };
 
-  const removeMember = (memberId: string) => {
+  const removeMember = async (memberId: string) => {
     const member = ws.members.find((m) => m.id === memberId);
     if (!confirm(`Remove ${member?.display_name ?? "this member"} from the project?`)) return;
-    remove.mutate(
-      { table: "project_members", id: memberId },
-      {
-        onSuccess: () =>
-          void logActivity(
-            ws.project.id,
-            "settings",
-            `Removed ${member?.display_name ?? "member"} from the team`,
-          ),
-      },
-    );
+    try {
+      setActionFeedback(null);
+      await membersService.removeMember(memberId, callerRole);
+      setActionFeedback({
+        type: "success",
+        message: `Removed ${member?.display_name ?? "member"} from the project.`,
+      });
+      void logActivity(
+        ws.project.id,
+        "settings",
+        `Removed ${member?.display_name ?? "member"} from the team`,
+      );
+      setTimeout(() => setActionFeedback(null), 3500);
+    } catch (err) {
+      setActionFeedback({
+        type: "error",
+        message: err instanceof Error ? err.message : "Failed to remove member.",
+      });
+      setTimeout(() => setActionFeedback(null), 5000);
+    }
   };
 
   const addMember = (e: React.FormEvent) => {
@@ -280,6 +307,24 @@ function SettingsBody({ ws }: { ws: Workspace }) {
             title="Team roster"
             subtitle="Click a role to change it. Add or remove teammates below."
           />
+
+          {actionFeedback && (
+            <div
+              className={`mx-4 mt-3 flex items-center gap-2 rounded-lg p-2.5 text-xs font-medium ${
+                actionFeedback.type === "success"
+                  ? "bg-success/15 text-success border border-success/30"
+                  : "bg-destructive/15 text-destructive border border-destructive/30"
+              }`}
+            >
+              {actionFeedback.type === "success" ? (
+                <Check className="size-4 shrink-0" />
+              ) : (
+                <AlertCircle className="size-4 shrink-0" />
+              )}
+              <span>{actionFeedback.message}</span>
+            </div>
+          )}
+
           <ul className="divide-y divide-border">
             {ws.members.map((m) => (
               <li key={m.id} className="flex flex-wrap items-center gap-2 px-4 py-3">
@@ -287,25 +332,26 @@ function SettingsBody({ ws }: { ws: Workspace }) {
 
                 {/* Editable role */}
                 {editingRole === m.id ? (
-                  <div className="flex items-center gap-1">
+                  <div className="flex flex-wrap items-center gap-1">
                     {ROLES.map((r) => (
                       <button
                         key={r}
                         type="button"
                         onClick={() => changeRole(m.id, r)}
-                        disabled={update.isPending}
+                        disabled={isUpdatingRole}
                         className={`rounded px-2 py-0.5 text-[10px] font-medium transition-colors ${
                           r === m.role
-                            ? "bg-primary text-primary-foreground"
+                            ? "bg-primary text-primary-foreground font-bold"
                             : "bg-secondary text-secondary-foreground hover:bg-accent"
                         }`}
                       >
-                        {r}
+                        {ROLE_CONFIG[r].label}
                       </button>
                     ))}
                     <button
                       type="button"
                       onClick={() => setEditingRole(null)}
+                      disabled={isUpdatingRole}
                       className="ml-1 text-[10px] text-muted-foreground hover:text-foreground"
                     >
                       ✕
@@ -404,7 +450,7 @@ function SettingsBody({ ws }: { ws: Workspace }) {
                   <label className="mb-1 block text-[11px] font-medium text-muted-foreground">
                     Role
                   </label>
-                  <div className="flex gap-1.5">
+                  <div className="flex flex-wrap gap-1.5">
                     {ROLES.map((r) => (
                       <button
                         key={r}
@@ -412,11 +458,11 @@ function SettingsBody({ ws }: { ws: Workspace }) {
                         onClick={() => setAddRole(r)}
                         className={`rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors ${
                           addRole === r
-                            ? "bg-primary text-primary-foreground"
+                            ? "bg-primary text-primary-foreground font-bold"
                             : "bg-secondary text-secondary-foreground hover:bg-accent"
                         }`}
                       >
-                        {r}
+                        {ROLE_CONFIG[r].label}
                       </button>
                     ))}
                   </div>
