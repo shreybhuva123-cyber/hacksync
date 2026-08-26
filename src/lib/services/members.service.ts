@@ -1,13 +1,49 @@
 import { supabase } from "@/integrations/supabase/client";
 import { roleEnum, type ProjectRole } from "@/lib/validation/schemas";
-import { DatabaseError, AuthorizationError } from "@/lib/errors";
-import { logger } from "@/lib/errors";
+import { canManageMembers } from "@/lib/hacksync/permissions";
+import { DatabaseError, AuthorizationError, logger } from "@/lib/errors";
 import type { Member } from "@/lib/hacksync/types";
 
 export const membersService = {
-  async updateRole(memberId: string, role: string): Promise<Member> {
+  /**
+   * Update a member's role with strict RBAC authorization check.
+   * Prevents self-service privilege escalation (e.g. member -> owner/lead).
+   */
+  async updateRole(
+    memberId: string,
+    role: string,
+    callerRole?: string | null,
+  ): Promise<Member> {
     const validatedRole = roleEnum.parse(role) as ProjectRole;
 
+    // Strict client-side privilege escalation guard
+    if (callerRole && !canManageMembers(callerRole)) {
+      throw new AuthorizationError(
+        "Only project owners and team leads can change member roles. Self-service role promotion is prohibited.",
+      );
+    }
+
+    // 1. Try server RPC function (with server-side SECURITY DEFINER check)
+    try {
+      const { data: rpcRes, error: rpcErr } = await (supabase.rpc as any)("change_member_role", {
+        p_member_id: memberId,
+        p_new_role: validatedRole,
+      });
+
+      if (!rpcErr && rpcRes) {
+        // Fetch updated member record
+        const { data: updated } = await supabase
+          .from("project_members")
+          .select("*")
+          .eq("id", memberId)
+          .single();
+        if (updated) return updated as Member;
+      }
+    } catch {
+      // Fallback to direct guarded table update if RPC not yet deployed in DB
+    }
+
+    // 2. Direct table update fallback (enforced by RLS)
     const { data: updated, error } = await supabase
       .from("project_members")
       .update({ role: validatedRole })
@@ -23,7 +59,31 @@ export const membersService = {
     return updated as Member;
   },
 
-  async removeMember(memberId: string): Promise<void> {
+  /**
+   * Remove a member from the project.
+   * Only accessible to leads/owners or members voluntarily leaving.
+   */
+  async removeMember(
+    memberId: string,
+    callerRole?: string | null,
+    isSelfLeave = false,
+  ): Promise<void> {
+    if (callerRole && !canManageMembers(callerRole) && !isSelfLeave) {
+      throw new AuthorizationError(
+        "You do not have permission to remove team members from this project.",
+      );
+    }
+
+    // Try server RPC
+    try {
+      const { error: rpcErr } = await (supabase.rpc as any)("remove_member_from_project", {
+        p_member_id: memberId,
+      });
+      if (!rpcErr) return;
+    } catch {
+      // Fallback to direct table delete
+    }
+
     const { error } = await supabase.from("project_members").delete().eq("id", memberId);
     if (error) {
       logger.error("Failed to remove member", error);
@@ -31,7 +91,14 @@ export const membersService = {
     }
   },
 
-  async updatePresence(memberId: string, workingArea?: string, branchName?: string): Promise<void> {
+  /**
+   * Update active user presence without altering any role permissions.
+   */
+  async updatePresence(
+    memberId: string,
+    workingArea?: string | null,
+    branchName?: string | null,
+  ): Promise<void> {
     await supabase
       .from("project_members")
       .update({

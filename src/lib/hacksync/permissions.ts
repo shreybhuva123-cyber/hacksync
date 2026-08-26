@@ -1,9 +1,6 @@
-/**
- * HackSync Role-Based Access Control (RBAC) System
- * Defines clear permissions and capability boundaries for all project roles.
- */
+import { type Role as CanonicalRole, ROLES } from "@/lib/constants/roles";
 
-export type ProjectRole = "owner" | "lead" | "frontend" | "backend" | "database" | "member";
+export type ProjectRole = CanonicalRole;
 
 export interface RoleCapability {
   canManageProject: boolean;

@@ -149,7 +149,7 @@ function SettingsBody({ ws }: { ws: Workspace }) {
           setAddRole("frontend");
           setShowAdd(false);
         },
-        onError: (err) => {
+        onError: (err: unknown) => {
           setAddError(err instanceof Error ? err.message : "Failed to add member.");
         },
       },

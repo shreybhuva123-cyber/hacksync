@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ROLES, type Role } from "@/lib/constants/roles";
 
 /**
  * Domain Validation Schemas for HackSync
@@ -7,8 +8,8 @@ import { z } from "zod";
 
 // ─── Enums & Identifiers ──────────────────────────────────────────────────
 
-export const roleEnum = z.enum(["frontend", "backend", "database", "lead", "owner", "member"]);
-export type ProjectRole = z.infer<typeof roleEnum>;
+export const roleEnum = z.enum(ROLES);
+export type ProjectRole = Role;
 
 export const taskStatusEnum = z.enum(["todo", "in_progress", "review", "done"]);
 export const taskPriorityEnum = z.enum(["low", "medium", "high", "critical"]);
@@ -44,7 +45,7 @@ export const createProjectSchema = z.object({
   userId: z.string().min(1, "User ID is required."),
 });
 
-export type CreateProjectInput = z.infer<typeof createProjectSchema>;
+export type CreateProjectInput = z.input<typeof createProjectSchema>;
 
 export const updateProjectSchema = z.object({
   name: z.string().trim().min(2).max(80).optional(),
@@ -54,7 +55,7 @@ export const updateProjectSchema = z.object({
   schema_version: z.string().trim().min(1).max(20).optional(),
 });
 
-export type UpdateProjectInput = z.infer<typeof updateProjectSchema>;
+export type UpdateProjectInput = z.input<typeof updateProjectSchema>;
 
 export const joinProjectSchema = z.object({
   inviteCode: z

@@ -28,6 +28,7 @@ import {
 import { computeReadiness, computeWarnings } from "@/lib/hacksync/analysis";
 import { auditWorkspaceSecurity } from "@/lib/hacksync/ai-security";
 import { TopTimerWidget } from "@/components/timer";
+import { AiCopilotModal } from "@/components/hacksync/AiCopilotModal";
 import type { Workspace } from "@/lib/hacksync/types";
 
 export const Route = createFileRoute("/demo")({
@@ -241,6 +242,7 @@ const DEMO_WORKSPACE: Workspace = {
 };
 
 function DemoPage() {
+  const [copilotOpen, setCopilotOpen] = useState(false);
   const readiness = useMemo(() => computeReadiness(DEMO_WORKSPACE), []);
   const security = useMemo(() => auditWorkspaceSecurity(DEMO_WORKSPACE), []);
 
@@ -264,6 +266,16 @@ function DemoPage() {
 
         <div className="flex items-center gap-3">
           <TopTimerWidget />
+
+          <button
+            type="button"
+            onClick={() => setCopilotOpen(true)}
+            className="flex items-center gap-1.5 rounded-lg border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary transition-colors hover:bg-primary/20"
+            title="Open AI Workspace Copilot"
+          >
+            <Sparkles className="size-3.5" />
+            <span>AI Copilot</span>
+          </button>
 
           <Link
             to="/auth"
@@ -368,6 +380,11 @@ function DemoPage() {
           </Panel>
         </div>
       </main>
+
+      <AiCopilotModal
+        isOpen={copilotOpen}
+        onClose={() => setCopilotOpen(false)}
+      />
     </div>
   );
 }

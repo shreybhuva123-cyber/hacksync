@@ -1,4 +1,6 @@
-export type Role = "frontend" | "backend" | "database" | "lead";
+export { ROLES, type Role, ROLE_CONFIG, ROLE_PERMISSIONS, isValidRole } from "@/lib/constants/roles";
+import type { Role } from "@/lib/constants/roles";
+
 export type Area = "frontend" | "backend" | "database" | "shared";
 export type LinkStatus = "healthy" | "broken" | "pending";
 export type CheckStatus = "pass" | "fail" | "warn";
@@ -212,3 +214,13 @@ export interface Workspace {
   handoffs: Handoff[];
   comments: ContractComment[];
 }
+
+export interface UserProject {
+  id: string;
+  name: string;
+  description: string | null;
+  invite_code: string;
+  created_at: string;
+  member_count?: number;
+}
+
