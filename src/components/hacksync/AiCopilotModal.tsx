@@ -322,6 +322,8 @@ I have direct access to your repository structure, database schema, and live int
                 <div className="font-semibold">🤖 OpenAI GPT-4o</div>
                 <p className="text-[10px] opacity-80 mt-0.5">Server Gateway (GPT-4o Mini)</p>
               </label>
+            </div>
+
             {tempProvider === "gemini" && (
               <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 space-y-1.5 animate-in fade-in">
                 <label className="text-[11px] font-semibold text-foreground flex items-center justify-between">
