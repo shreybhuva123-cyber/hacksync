@@ -34,6 +34,7 @@ import { computeReadiness, computeWarnings } from "@/lib/hacksync/analysis";
 import { auditWorkspaceSecurity } from "@/lib/hacksync/ai-security";
 import { RoleBadge, StatusPill } from "./primitives";
 import { AiCopilotModal } from "./AiCopilotModal";
+import { TopTimerWidget } from "@/components/timer";
 
 const NAV: { group: string; items: { to: string; label: string; icon: typeof Boxes }[] }[] = [
   {
@@ -258,6 +259,9 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
 
           <div className="ml-auto flex items-center gap-2.5">
+            {/* Hackathon Top Countdown / Stopwatch Timer & Activity History */}
+            <TopTimerWidget />
+
             {/* AI Copilot Action Button */}
             <button
               type="button"

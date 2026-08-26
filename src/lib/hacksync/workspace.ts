@@ -2,6 +2,13 @@ import { useEffect, useMemo } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useActiveProjectId, setActiveProjectId } from "@/hooks/useActiveProject";
+import {
+  projectsService,
+  tasksService,
+  contractsService,
+  schemaService,
+  membersService,
+} from "@/lib/services";
 import type {
   ActivityEvent,
   ApiContract,
@@ -1045,12 +1052,20 @@ export function useWorkspace() {
   useEffect(() => {
     let channel: ReturnType<typeof supabase.channel> | null = null;
     try {
-      const channelId = `hacksync-workspace-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      const channelId = `hacksync-workspace-${activeId ?? "all"}-${Date.now()}`;
       channel = supabase
         .channel(channelId)
-        .on("postgres_changes", { event: "*", schema: "public" }, () => {
-          queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY });
-        })
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            ...(activeId ? { filter: `project_id=eq.${activeId}` } : {}),
+          },
+          () => {
+            queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY });
+          },
+        )
         .subscribe();
     } catch {
       // Ignore realtime subscription errors in offline or demo mode
@@ -1065,7 +1080,7 @@ export function useWorkspace() {
         }
       }
     };
-  }, [queryClient]);
+  }, [queryClient, activeId]);
 
   return query;
 }
@@ -1083,13 +1098,11 @@ export interface UserProject {
 
 async function loadUserProjects(): Promise<UserProject[]> {
   try {
-    // Load all projects — RLS will filter to ones the user can access
     const { data, error } = await db
       .from("projects")
       .select("id, name, description, invite_code, created_at")
       .order("created_at", { ascending: false });
     if (error || !data || data.length === 0) {
-      // Return demo project so the Projects page is never empty
       return [
         {
           id: DEMO_PROJECT_ID,
@@ -1123,7 +1136,7 @@ export function useUserProjects() {
   });
 }
 
-// ─── Create Project ────────────────────────────────────────────────────
+// ─── Domain Service Mutation Hooks (Production-Grade) ───────────────────
 
 export function useCreateProject() {
   const queryClient = useQueryClient();
@@ -1136,31 +1149,7 @@ export function useCreateProject() {
       displayName: string;
       userId: string;
     }) => {
-      // 1. Create the project
-      const { data: project, error: pErr } = await db
-        .from("projects")
-        .insert({
-          name: input.name,
-          description: input.description || null,
-          repo_url: input.repo_url || null,
-          created_by: input.userId,
-        })
-        .select("*")
-        .single();
-      if (pErr) throw pErr;
-
-      // 2. Add the creator as a member
-      const { error: mErr } = await db.from("project_members").insert({
-        project_id: (project as Project).id,
-        user_id: input.userId,
-        display_name: input.displayName,
-        role: input.role,
-        email: null,
-        online: true,
-      });
-      if (mErr) throw mErr;
-
-      return project as Project;
+      return await projectsService.createProject(input as any);
     },
     onSuccess: (project) => {
       setActiveProjectId(project.id);
@@ -1169,8 +1158,6 @@ export function useCreateProject() {
     },
   });
 }
-
-// ─── Join Project by Invite Code ───────────────────────────────────────
 
 export function useJoinProject() {
   const queryClient = useQueryClient();
@@ -1181,40 +1168,7 @@ export function useJoinProject() {
       role: string;
       userId: string;
     }) => {
-      // 1. Find project by invite code
-      const { data: project, error: findErr } = await db
-        .from("projects")
-        .select("*")
-        .eq("invite_code", input.inviteCode)
-        .maybeSingle();
-      if (findErr) throw findErr;
-      if (!project) throw new Error("No project found with that invite code.");
-
-      // 2. Check if already a member
-      const { data: existing } = await db
-        .from("project_members")
-        .select("id")
-        .eq("project_id", (project as Project).id)
-        .eq("user_id", input.userId)
-        .maybeSingle();
-
-      if (existing) {
-        // Already a member — just switch to it
-        return project as Project;
-      }
-
-      // 3. Add as member
-      const { error: mErr } = await db.from("project_members").insert({
-        project_id: (project as Project).id,
-        user_id: input.userId,
-        display_name: input.displayName,
-        role: input.role,
-        email: null,
-        online: true,
-      });
-      if (mErr) throw mErr;
-
-      return project as Project;
+      return await projectsService.joinProject(input as any);
     },
     onSuccess: (project) => {
       setActiveProjectId(project.id);
@@ -1224,9 +1178,110 @@ export function useJoinProject() {
   });
 }
 
-// ─── Row-level mutations ───────────────────────────────────────────────
+// Task Domain Hooks
+export function useCreateTask() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: tasksService.createTask,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY }),
+  });
+}
 
-/** Generic project-scoped row update with workspace refresh. */
+export function useUpdateTask() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: string; input: Parameters<typeof tasksService.updateTask>[1] }) =>
+      tasksService.updateTask(id, input),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY }),
+  });
+}
+
+export function useDeleteTask() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: tasksService.deleteTask,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY }),
+  });
+}
+
+// Contract Domain Hooks
+export function useCreateContract() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: contractsService.createContract,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY }),
+  });
+}
+
+export function useUpdateContract() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: string; input: Parameters<typeof contractsService.updateContract>[1] }) =>
+      contractsService.updateContract(id, input),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY }),
+  });
+}
+
+export function useToggleLockContract() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: contractsService.toggleLock,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY }),
+  });
+}
+
+export function useDeleteContract() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: contractsService.deleteContract,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY }),
+  });
+}
+
+// Database Schema Hooks
+export function useCreateTable() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: schemaService.createTable,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY }),
+  });
+}
+
+export function useDeleteTable() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: schemaService.deleteTable,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY }),
+  });
+}
+
+export function useAddColumn() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: schemaService.addColumn,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY }),
+  });
+}
+
+// Member Hooks
+export function useUpdateMemberRole() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, role }: { id: string; role: string }) => membersService.updateRole(id, role),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY }),
+  });
+}
+
+export function useRemoveMember() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: membersService.removeMember,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY }),
+  });
+}
+
+// ─── Legacy compatibility helpers ──────────────────────────────────────
+
 export function useRowMutation() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -1272,7 +1327,7 @@ export async function logActivity(
       .from("activity_events")
       .insert({ project_id: projectId, kind, message, actor, actor_role: actorRole });
   } catch {
-    // Silently ignore — demo mode has no DB write access
+    // Demo mode / offline
   }
 }
 

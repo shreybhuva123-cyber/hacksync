@@ -9,6 +9,7 @@ import {
   Sparkles,
   KeyRound,
   Check,
+  ShieldCheck,
 } from "lucide-react";
 import { WorkspaceView } from "@/components/hacksync/WorkspaceView";
 import {
@@ -21,12 +22,8 @@ import {
 } from "@/components/hacksync/primitives";
 import { useAuth } from "@/hooks/useAuth";
 import { logActivity, useRowDelete, useRowInsert, useRowMutation } from "@/lib/hacksync/workspace";
-import {
-  getAISettings,
-  saveAISettings,
-  type AISettings,
-  type LLMProviderType,
-} from "@/lib/hacksync/llm-provider";
+import { DEFAULT_AI_SETTINGS, type AISettings, type LLMProviderType } from "@/lib/hacksync/llm-provider";
+import { canManageMembers, canDeleteProject } from "@/lib/hacksync/permissions";
 import type { Role, Workspace } from "@/lib/hacksync/types";
 
 export const Route = createFileRoute("/_authenticated/settings")({
@@ -70,14 +67,13 @@ function SettingsBody({ ws }: { ws: Workspace }) {
   const [editingRole, setEditingRole] = useState<string | null>(null);
 
   // AI Intelligence settings
-  const [aiSettings, setAiSettings] = useState<AISettings>(getAISettings);
+  const [aiSettings, setAiSettings] = useState<AISettings>(DEFAULT_AI_SETTINGS);
   const [aiSaved, setAiSaved] = useState(false);
 
-  const saveAi = (provider: LLMProviderType, apiKey?: string, model?: string) => {
-    saveAISettings({ provider, apiKey, model });
-    setAiSettings(getAISettings());
+  const saveAi = (provider: LLMProviderType, model = "gemini-2.0-flash") => {
+    setAiSettings({ provider, model, temperature: 0.7 });
     setAiSaved(true);
-    setTimeout(() => setAiSaved(false), 2500);
+    setTimeout(() => setAiSaved(false), 2000);
   };
 
   const toggleDemo = () => {
@@ -239,7 +235,7 @@ function SettingsBody({ ws }: { ws: Workspace }) {
 
               <button
                 type="button"
-                onClick={() => saveAi("gemini", aiSettings.apiKey, "gemini-2.0-flash")}
+                onClick={() => saveAi("gemini", "gemini-2.0-flash")}
                 className={`rounded-lg border p-3 text-left transition-all ${
                   aiSettings.provider === "gemini"
                     ? "border-primary bg-primary/10 text-primary font-medium"
@@ -249,12 +245,12 @@ function SettingsBody({ ws }: { ws: Workspace }) {
                 <div className="font-semibold text-xs flex items-center gap-1.5">
                   <Bot className="size-3.5" /> Google Gemini
                 </div>
-                <p className="text-[10px] opacity-80 mt-1">Free API (Gemini 2.0 / 1.5 Flash)</p>
+                <p className="text-[10px] opacity-80 mt-1">Server Gateway (Gemini 2.0 Flash)</p>
               </button>
 
               <button
                 type="button"
-                onClick={() => saveAi("openai", aiSettings.apiKey, "gpt-4o-mini")}
+                onClick={() => saveAi("openai", "gpt-4o-mini")}
                 className={`rounded-lg border p-3 text-left transition-all ${
                   aiSettings.provider === "openai"
                     ? "border-primary bg-primary/10 text-primary font-medium"
@@ -264,43 +260,18 @@ function SettingsBody({ ws }: { ws: Workspace }) {
                 <div className="font-semibold text-xs flex items-center gap-1.5">
                   <Bot className="size-3.5" /> OpenAI
                 </div>
-                <p className="text-[10px] opacity-80 mt-1">GPT-4o & GPT-4o Mini</p>
+                <p className="text-[10px] opacity-80 mt-1">Server Gateway (GPT-4o Mini)</p>
               </button>
             </div>
 
-            {aiSettings.provider !== "builtin" ? (
-              <div className="space-y-2 rounded-lg border border-border bg-muted/40 p-3">
-                <label className="block text-xs font-medium text-foreground">
-                  {aiSettings.provider === "gemini"
-                    ? "Google Gemini API Key (Free)"
-                    : "OpenAI API Key"}
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="password"
-                    defaultValue={aiSettings.apiKey ?? ""}
-                    id="setting-ai-key"
-                    placeholder={aiSettings.provider === "gemini" ? "AIzaSy..." : "sk-proj-..."}
-                    className="flex-1 rounded-md border border-input bg-background px-3 py-1.5 text-xs outline-none focus:border-primary"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const input = document.getElementById("setting-ai-key") as HTMLInputElement;
-                      if (input) saveAi(aiSettings.provider, input.value.trim(), aiSettings.model);
-                    }}
-                    className="flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:opacity-90"
-                  >
-                    {aiSaved ? <Check className="size-3" /> : null}
-                    {aiSaved ? "Saved!" : "Save Key"}
-                  </button>
-                </div>
-                <p className="text-[10px] text-muted-foreground">
-                  Your API key never leaves your browser — it is stored securely in localStorage and
-                  called directly via HTTPS.
-                </p>
+            <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 space-y-1">
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-primary">
+                <ShieldCheck className="size-3.5" /> Server-Side AI Gateway Protected
               </div>
-            ) : null}
+              <p className="text-[11px] text-muted-foreground">
+                All AI queries are proxied through the authenticated server gateway with token-bucket rate limiting and zero client-side secret exposure.
+              </p>
+            </div>
           </div>
         </Panel>
 

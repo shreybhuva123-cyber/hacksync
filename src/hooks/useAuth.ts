@@ -1,112 +1,77 @@
-import { useEffect, useState, useSyncExternalStore } from "react";
-import type { Session, User } from "@supabase/supabase-js";
+import { useEffect, useState } from "react";
+import type { Session, User, AuthError } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
+import { logger } from "@/lib/errors";
 
-const LOCAL_USER_KEY = "hacksync_auth_user";
-
-export interface LocalAuthUser {
-  id: string;
-  email: string;
-  display_name: string;
-  role?: string;
+export interface AuthState {
+  session: Session | null;
+  user: User | null;
+  loading: boolean;
+  error: AuthError | Error | null;
 }
 
-let localUserListeners: Array<() => void> = [];
-let cachedLocalUser: LocalAuthUser | null = null;
-let cachedRaw: string | null = null;
+/**
+ * Enterprise Production Supabase Auth Hook
+ * Strictly verifies real Supabase Auth sessions, listens for token refreshes,
+ * and eliminates all fake guest/mock token creation.
+ */
+export function useAuth(): AuthState {
+  const [session, setSession] = useState<Session | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<AuthError | Error | null>(null);
 
-export function getLocalAuthUser(): LocalAuthUser | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = localStorage.getItem(LOCAL_USER_KEY);
-    if (raw === cachedRaw) return cachedLocalUser;
-    cachedRaw = raw;
-    cachedLocalUser = raw ? JSON.parse(raw) : null;
-    return cachedLocalUser;
-  } catch {
-    return null;
-  }
-}
+  useEffect(() => {
+    let mounted = true;
 
-export function setLocalAuthUser(user: LocalAuthUser) {
-  if (typeof window === "undefined") return;
-  const raw = JSON.stringify(user);
-  cachedRaw = raw;
-  cachedLocalUser = user;
-  localStorage.setItem(LOCAL_USER_KEY, raw);
-  localUserListeners.forEach((l) => l());
-}
+    // 1. Fetch active session from Supabase Client
+    supabase.auth
+      .getSession()
+      .then(({ data, error: sessionErr }) => {
+        if (!mounted) return;
+        if (sessionErr) {
+          logger.warn("Supabase getSession error", { error: sessionErr.message });
+          setError(sessionErr);
+        }
+        setSession(data.session ?? null);
+        setLoading(false);
+      })
+      .catch((err) => {
+        if (!mounted) return;
+        logger.error("Unexpected error retrieving Supabase session", err);
+        setError(err instanceof Error ? err : new Error(String(err)));
+        setLoading(false);
+      });
 
-export function clearLocalAuthUser() {
-  if (typeof window === "undefined") return;
-  cachedRaw = null;
-  cachedLocalUser = null;
-  localStorage.removeItem(LOCAL_USER_KEY);
-  localUserListeners.forEach((l) => l());
-}
+    // 2. Subscribe to auth state changes (sign in, sign out, token refresh)
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      if (!mounted) return;
+      logger.info(`Auth state changed: ${event}`, { userId: nextSession?.user?.id });
+      setSession(nextSession);
+      setLoading(false);
+    });
 
-function subscribeLocalUser(listener: () => void) {
-  localUserListeners.push(listener);
-  return () => {
-    localUserListeners = localUserListeners.filter((l) => l !== listener);
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  return {
+    session,
+    user: session?.user ?? null,
+    loading,
+    error,
   };
 }
 
-export function useAuth() {
-  const [supabaseSession, setSupabaseSession] = useState<Session | null>(null);
-  const [loading, setLoading] = useState(true);
-  const localUser = useSyncExternalStore(subscribeLocalUser, getLocalAuthUser, () => null);
-
-  useEffect(() => {
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, next) => {
-      setSupabaseSession(next);
-      setLoading(false);
-    });
-    void supabase.auth
-      .getSession()
-      .then(({ data }) => {
-        setSupabaseSession(data.session);
-        setLoading(false);
-      })
-      .catch(() => {
-        setLoading(false);
-      });
-    return () => sub.subscription.unsubscribe();
-  }, []);
-
-  // Construct standard User object from either Supabase or Local Demo User
-  let user: User | null = supabaseSession?.user ?? null;
-  if (!user && localUser) {
-    user = {
-      id: localUser.id,
-      app_metadata: { provider: "email" },
-      user_metadata: { display_name: localUser.display_name, role: localUser.role || "lead" },
-      aud: "authenticated",
-      created_at: new Date().toISOString(),
-      email: localUser.email,
-      phone: "",
-      role: "authenticated",
-      updated_at: new Date().toISOString(),
-    };
+export async function signOut(): Promise<void> {
+  try {
+    const { error } = await supabase.auth.signOut();
+    if (error) throw error;
+  } catch (err) {
+    logger.error("Sign out error", err);
+    throw err;
   }
-
-  const session: Session | null =
-    supabaseSession ??
-    (user
-      ? ({
-          access_token: "mock-access-token",
-          token_type: "bearer",
-          expires_in: 3600,
-          refresh_token: "mock-refresh-token",
-          user,
-          expires_at: Math.floor(Date.now() / 1000) + 3600,
-        } as Session)
-      : null);
-
-  return { session, user, loading };
-}
-
-export async function signOut() {
-  clearLocalAuthUser();
-  await supabase.auth.signOut().catch(() => {});
 }

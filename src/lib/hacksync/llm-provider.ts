@@ -1,40 +1,20 @@
 import type { Workspace, CodeNode } from "./types";
+import { processServerAIQuery } from "@/lib/ai/ai-gateway";
+import { logger } from "@/lib/errors";
 
-export type LLMProviderType = "builtin" | "gemini" | "openai" | "custom";
+export type LLMProviderType = "builtin" | "gemini" | "openai";
 
 export interface AISettings {
   provider: LLMProviderType;
-  apiKey?: string | undefined;
-  model?: string | undefined;
-  customEndpoint?: string | undefined;
-  temperature?: number | undefined;
+  model: string;
+  temperature: number;
 }
-
-const AI_SETTINGS_KEY = "hacksync_ai_settings";
 
 export const DEFAULT_AI_SETTINGS: AISettings = {
   provider: "builtin",
   model: "gemini-2.0-flash",
   temperature: 0.7,
 };
-
-export function getAISettings(): AISettings {
-  if (typeof window === "undefined") return DEFAULT_AI_SETTINGS;
-  try {
-    const raw = localStorage.getItem(AI_SETTINGS_KEY);
-    if (!raw) return DEFAULT_AI_SETTINGS;
-    return { ...DEFAULT_AI_SETTINGS, ...JSON.parse(raw) };
-  } catch {
-    return DEFAULT_AI_SETTINGS;
-  }
-}
-
-export function saveAISettings(settings: Partial<AISettings>) {
-  if (typeof window === "undefined") return;
-  const current = getAISettings();
-  const updated = { ...current, ...settings };
-  localStorage.setItem(AI_SETTINGS_KEY, JSON.stringify(updated));
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Workspace System Prompt Construction (Full RAG Context)
@@ -123,103 +103,6 @@ YOUR CAPABILITIES & GUIDELINES:
    - Step-by-step code conversion snippet with before/after blocks
 3. Cyber Security & Vulnerability Analysis: Proactively assess endpoints for authentication, SQL injection, IDOR/BOLA, and provide OWASP Top 10 remediation patches.
 4. Formatting: Use clean GitHub-flavored Markdown with syntax-highlighted code blocks, bold headings, bullet lists, and practical tips. Be concise yet deeply informative.`;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Real LLM API Dispatchers (Gemini & OpenAI)
-// ─────────────────────────────────────────────────────────────────────────────
-
-async function callGoogleGemini(
-  prompt: string,
-  systemPrompt: string,
-  apiKey: string,
-  model = "gemini-2.0-flash",
-  chatHistory: { role: string; content: string }[] = [],
-): Promise<string> {
-  const cleanModel = model.includes("gemini") ? model : "gemini-2.0-flash";
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${encodeURIComponent(apiKey.trim())}`;
-
-  const contents = [
-    ...chatHistory.slice(-6).map((m) => ({
-      role: m.role === "assistant" ? "model" : "user",
-      parts: [{ text: m.content }],
-    })),
-    {
-      role: "user",
-      parts: [{ text: prompt }],
-    },
-  ];
-
-  const payload = {
-    system_instruction: {
-      parts: [{ text: systemPrompt }],
-    },
-    contents,
-    generationConfig: {
-      temperature: 0.7,
-      maxOutputTokens: 2048,
-    },
-  };
-
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-
-  if (!res.ok) {
-    const errBody = await res.text().catch(() => "");
-    throw new Error(`Gemini API Error (${res.status}): ${errBody || res.statusText}`);
-  }
-
-  const data = await res.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error("Empty response received from Gemini API.");
-  return text;
-}
-
-async function callOpenAI(
-  prompt: string,
-  systemPrompt: string,
-  apiKey: string,
-  model = "gpt-4o-mini",
-  chatHistory: { role: string; content: string }[] = [],
-): Promise<string> {
-  const url = "https://api.openai.com/v1/chat/completions";
-
-  const messages = [
-    { role: "system", content: systemPrompt },
-    ...chatHistory.slice(-6).map((m) => ({
-      role: m.role === "assistant" ? "assistant" : "user",
-      content: m.content,
-    })),
-    { role: "user", content: prompt },
-  ];
-
-  const payload = {
-    model: model || "gpt-4o-mini",
-    messages,
-    temperature: 0.7,
-  };
-
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey.trim()}`,
-    },
-    body: JSON.stringify(payload),
-  });
-
-  if (!res.ok) {
-    const errBody = await res.text().catch(() => "");
-    throw new Error(`OpenAI API Error (${res.status}): ${errBody || res.statusText}`);
-  }
-
-  const data = await res.json();
-  const text = data?.choices?.[0]?.message?.content;
-  if (!text) throw new Error("Empty response received from OpenAI API.");
-  return text;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -360,7 +243,7 @@ export function useUsersList() {
     queryKey: ["api", "GET", "/api/users"],
     queryFn: async () => {
       const res = await fetch("/api/users", {
-        headers: { Authorization: \`Bearer \${localStorage.getItem("token")}\` }
+        headers: { Authorization: \`Bearer \${token}\` }
       });
       if (!res.ok) throw new Error("Failed to load users");
       return res.json();
@@ -405,7 +288,7 @@ CREATE TABLE IF NOT EXISTS "projects" (
 \`\`\``;
   }
 
-  // 5. General / Arbitrary Programming Question Handler
+  // 5. General / Out-of-the-Box Question Handler
   return `### 💡 Architectural Analysis: "${userQuery}"
 
 Based on your workspace and full-stack engineering standards:
@@ -413,8 +296,8 @@ Based on your workspace and full-stack engineering standards:
 #### 1. Core Principles & Recommendation:
 When designing or implementing this in **${projName}**, prioritize:
 - **Type Safety**: Enforce strict TypeScript types and eliminate \`any\`.
-- **Fault Isolation**: Wrap network and database operations in resilient error boundaries with automatic fallback data.
-- **Asynchronous Correctness**: Always await promises or provide clean \`.catch()\` handlers to prevent silent promise rejections.
+- **Fault Isolation**: Wrap network and database operations in resilient error boundaries with clear error types.
+- **Asynchronous Correctness**: Always await promises or provide clean error handling to prevent unhandled rejections.
 
 #### 2. Recommended Implementation Pattern:
 \`\`\`typescript
@@ -438,10 +321,9 @@ export async function executeOperation<T>(params: { id: string }): Promise<T> {
 }
 \`\`\`
 
-#### 3. Next Steps & Tools:
+#### 3. Proactive Next Steps:
 - Want to inspect live security vulnerabilities? Ask: *"Run a cyber security audit"*
-- Want to explain specific algorithms? Ask: *"Why did we use a for loop instead of while?"*
-- Want to connect a real **Gemini or OpenAI key** for unbounded live generation? Open AI Settings in the top-right!`;
+- Want to explain specific algorithms? Ask: *"Why did we use a for loop instead of while?"*`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -453,43 +335,31 @@ export async function queryLLM(
   ws?: Workspace | null,
   activeNode?: CodeNode | null,
   chatHistory: { role: string; content: string }[] = [],
+  modelPreference = "builtin",
 ): Promise<{ text: string; providerUsed: string }> {
-  const settings = getAISettings();
   const systemPrompt = buildWorkspaceSystemPrompt(ws, activeNode);
 
-  // 1. If Gemini provider is configured with API key
-  if (settings.provider === "gemini" && settings.apiKey) {
-    try {
-      const text = await callGoogleGemini(
+  try {
+    // 1. Dispatch through Server AI Gateway
+    const result = await processServerAIQuery(
+      {
         prompt,
-        systemPrompt,
-        settings.apiKey,
-        settings.model,
-        chatHistory,
-      );
-      return { text, providerUsed: `Gemini (${settings.model || "2.0 Flash"})` };
-    } catch (err) {
-      console.warn("Gemini call failed, falling back to Deep Reasoning Engine:", err);
+        model: modelPreference as any,
+        projectId: ws?.project.id ?? null,
+        chatHistory: chatHistory as any,
+      },
+      ws?.project.id ?? "anonymous",
+      systemPrompt,
+    );
+
+    if (result.text) {
+      return result;
     }
+  } catch (err) {
+    logger.warn("AI Gateway query failed, using built-in reasoning engine", { error: String(err) });
   }
 
-  // 2. If OpenAI provider is configured with API key
-  if (settings.provider === "openai" && settings.apiKey) {
-    try {
-      const text = await callOpenAI(
-        prompt,
-        systemPrompt,
-        settings.apiKey,
-        settings.model,
-        chatHistory,
-      );
-      return { text, providerUsed: `OpenAI (${settings.model || "GPT-4o Mini"})` };
-    } catch (err) {
-      console.warn("OpenAI call failed, falling back to Deep Reasoning Engine:", err);
-    }
-  }
-
-  // 3. Autonomous Deep Reasoning Engine Fallback (Zero setup, 100% offline & reliable)
+  // 2. Autonomous Deep Reasoning Engine (Zero setup, 100% offline & reliable)
   const text = synthesizeAutonomousResponse(prompt, ws, activeNode);
   return { text, providerUsed: "HackSync Deep Reasoning Engine" };
 }

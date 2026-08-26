@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Boxes, Database, GitBranch, Network, PlugZap, ShieldCheck, Terminal } from "lucide-react";
+import { Boxes, Database, GitBranch, Network, PlugZap, ShieldCheck, Terminal, Zap } from "lucide-react";
 import { StatusPill } from "@/components/hacksync/primitives";
 
 export const Route = createFileRoute("/")({
@@ -72,6 +72,7 @@ function Landing() {
           </div>
           <Link
             to="/auth"
+            search={{ redirect: "/dashboard" }}
             className="rounded-md bg-primary px-3.5 py-1.5 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90"
           >
             Enter workspace
@@ -99,23 +100,25 @@ function Landing() {
           <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
             <Link
               to="/auth"
+              search={{ redirect: "/dashboard" }}
               className="rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
             >
-              Open the demo workspace
+              Sign In to Workspace
             </Link>
             <Link
-              to="/auth"
-              className="rounded-lg border border-border-strong bg-secondary px-5 py-2.5 text-sm font-semibold text-secondary-foreground transition-colors hover:bg-accent"
+              to="/demo"
+              className="rounded-lg border border-border-strong bg-secondary px-5 py-2.5 text-sm font-semibold text-secondary-foreground transition-colors hover:bg-accent flex items-center gap-1.5"
             >
-              Create an account
+              <Zap className="size-3.5 text-primary fill-primary" />
+              Explore Sandbox Demo
             </Link>
           </div>
 
           <div className="mono mt-10 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-[11px] tracking-wide text-muted-foreground uppercase">
             <span className="text-frontend">● frontend</span>
-            <span className="text-backend">● backend / api</span>
+            <span className="text-backend">● backend</span>
             <span className="text-database">● database</span>
-            <span className="text-lead">● team lead</span>
+            <span className="text-lead">● lead</span>
           </div>
         </div>
       </section>
@@ -174,7 +177,7 @@ function Landing() {
         <span className="flex items-center gap-1.5">
           <Boxes className="size-3.5" /> HackSync — hackathon integration control center
         </span>
-        <Link to="/auth" className="hover:text-primary">
+        <Link to="/auth" search={{ redirect: "/dashboard" }} className="hover:text-primary">
           Enter workspace →
         </Link>
       </footer>

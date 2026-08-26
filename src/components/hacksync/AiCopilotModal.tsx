@@ -17,8 +17,7 @@ import {
 import { useWorkspace } from "@/lib/hacksync/workspace";
 import { askWorkspaceCopilot, type CopilotMessage } from "@/lib/hacksync/ai-assistant";
 import {
-  getAISettings,
-  saveAISettings,
+  DEFAULT_AI_SETTINGS,
   type AISettings,
   type LLMProviderType,
 } from "@/lib/hacksync/llm-provider";
@@ -50,9 +49,8 @@ const PRESET_PROMPTS = [
 
 export function AiCopilotModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
   const { data: ws } = useWorkspace();
-  const [settings, setSettings] = useState<AISettings>(getAISettings);
+  const [settings, setSettings] = useState<AISettings>(DEFAULT_AI_SETTINGS);
   const [showSettings, setShowSettings] = useState(false);
-  const [tempApiKey, setTempApiKey] = useState("");
   const [tempProvider, setTempProvider] = useState<LLMProviderType>("builtin");
   const [tempModel, setTempModel] = useState("gemini-2.0-flash");
 
@@ -78,7 +76,6 @@ I have direct access to your repository structure, database schema, and live int
 
   useEffect(() => {
     if (isOpen) {
-      setSettings(getAISettings());
       setTimeout(() => inputRef.current?.focus(), 100);
     }
   }, [isOpen]);
@@ -116,7 +113,7 @@ I have direct access to your repository structure, database schema, and live int
           role: "assistant",
           timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
           content:
-            "❌ Sorry, I encountered an issue analyzing your request. Please check your network connection or API key settings.",
+            "❌ Sorry, I encountered an issue analyzing your request. Please check your network connection or try the built-in Deep Reasoning Engine.",
         },
       ]);
     } finally {
@@ -125,13 +122,11 @@ I have direct access to your repository structure, database schema, and live int
   };
 
   const handleSaveSettings = () => {
-    const updated: Partial<AISettings> = {
+    setSettings({
       provider: tempProvider,
-      apiKey: tempApiKey.trim() || undefined,
       model: tempModel,
-    };
-    saveAISettings(updated);
-    setSettings(getAISettings());
+      temperature: 0.7,
+    });
     setShowSettings(false);
   };
 
@@ -180,11 +175,10 @@ I have direct access to your repository structure, database schema, and live int
               type="button"
               onClick={() => {
                 setTempProvider(settings.provider);
-                setTempApiKey(settings.apiKey ?? "");
                 setTempModel(settings.model ?? "gemini-2.0-flash");
                 setShowSettings(!showSettings);
               }}
-              title="Configure AI Model / API Keys"
+              title="Select AI Model"
               className={cn(
                 "flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors",
                 showSettings
@@ -220,10 +214,10 @@ I have direct access to your repository structure, database schema, and live int
           <div className="border-b border-border bg-muted/90 p-4 text-xs space-y-3 animate-in fade-in slide-in-from-top-2">
             <div className="flex items-center justify-between">
               <span className="font-semibold text-foreground flex items-center gap-1.5">
-                <KeyRound className="size-3.5 text-primary" /> AI Model & API Configuration
+                <KeyRound className="size-3.5 text-primary" /> AI Model Selection (Server-Secured)
               </span>
               <span className="text-[11px] text-muted-foreground">
-                Keys stored securely in local browser storage
+                Rate-limited server gateway
               </span>
             </div>
 
@@ -262,10 +256,13 @@ I have direct access to your repository structure, database schema, and live int
                   name="provider"
                   className="sr-only"
                   checked={tempProvider === "gemini"}
-                  onChange={() => setTempProvider("gemini")}
+                  onChange={() => {
+                    setTempProvider("gemini");
+                    setTempModel("gemini-2.0-flash");
+                  }}
                 />
                 <div className="font-semibold">✨ Google Gemini</div>
-                <p className="text-[10px] opacity-80 mt-0.5">Free API (Gemini 2.0 / 1.5 Flash)</p>
+                <p className="text-[10px] opacity-80 mt-0.5">Server Gateway (Gemini 2.0 Flash)</p>
               </label>
 
               <label
@@ -281,27 +278,15 @@ I have direct access to your repository structure, database schema, and live int
                   name="provider"
                   className="sr-only"
                   checked={tempProvider === "openai"}
-                  onChange={() => setTempProvider("openai")}
+                  onChange={() => {
+                    setTempProvider("openai");
+                    setTempModel("gpt-4o-mini");
+                  }}
                 />
                 <div className="font-semibold">🤖 OpenAI GPT-4o</div>
-                <p className="text-[10px] opacity-80 mt-0.5">GPT-4o / GPT-4o Mini</p>
+                <p className="text-[10px] opacity-80 mt-0.5">Server Gateway (GPT-4o Mini)</p>
               </label>
             </div>
-
-            {tempProvider !== "builtin" ? (
-              <div className="space-y-1.5 pt-1">
-                <label className="text-[11px] font-medium text-foreground">
-                  {tempProvider === "gemini" ? "Google Gemini API Key" : "OpenAI API Key"}
-                </label>
-                <input
-                  type="password"
-                  value={tempApiKey}
-                  onChange={(e) => setTempApiKey(e.target.value)}
-                  placeholder={tempProvider === "gemini" ? "AIzaSy..." : "sk-proj-..."}
-                  className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs outline-none focus:border-primary"
-                />
-              </div>
-            ) : null}
 
             <div className="flex justify-end gap-2 pt-1">
               <button
@@ -316,7 +301,7 @@ I have direct access to your repository structure, database schema, and live int
                 onClick={handleSaveSettings}
                 className="rounded-md bg-primary px-3 py-1 text-xs font-semibold text-primary-foreground hover:opacity-90"
               >
-                Save Settings
+                Apply Model
               </button>
             </div>
           </div>
@@ -374,8 +359,8 @@ I have direct access to your repository structure, database schema, and live int
             <div className="flex items-center gap-2 text-xs text-muted-foreground p-2">
               <Loader2 className="size-3.5 animate-spin text-primary" />
               <span>
-                {settings.provider !== "builtin" && settings.apiKey
-                  ? `Querying ${settings.provider === "gemini" ? "Google Gemini" : "OpenAI"} with full workspace context...`
+                {settings.provider !== "builtin"
+                  ? `Querying ${settings.provider === "gemini" ? "Google Gemini" : "OpenAI"} via Server AI Gateway...`
                   : "Analyzing full repository AST, database tables, and API contracts..."}
               </span>
             </div>
