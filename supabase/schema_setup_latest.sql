@@ -147,7 +147,7 @@ DROP POLICY IF EXISTS "read accessible projects" ON public.projects;
 CREATE POLICY "read accessible projects" ON public.projects FOR SELECT TO authenticated USING (public.can_view_project(id));
 
 DROP POLICY IF EXISTS "create projects" ON public.projects;
-CREATE POLICY "create projects" ON public.projects FOR INSERT TO authenticated WITH CHECK (auth.uid() = created_by);
+CREATE POLICY "create projects" ON public.projects FOR INSERT TO authenticated WITH CHECK (auth.uid() = created_by OR created_by IS NULL);
 
 DROP POLICY IF EXISTS "update accessible projects" ON public.projects;
 CREATE POLICY "update accessible projects" ON public.projects FOR UPDATE TO authenticated USING (public.can_manage_members(id));

@@ -18,7 +18,12 @@ export const projectsService = {
   async createProject(input: CreateProjectInput): Promise<Project> {
     const validated = createProjectSchema.parse(input);
 
-    logger.info(`Creating project "${validated.name}" for user ${validated.userId}`);
+    // 0. Ensure we use the actual Supabase session UID for PostgreSQL RLS compliance
+    const { data: authData } = await supabase.auth.getUser();
+    const currentAuthId = authData?.user?.id ?? null;
+    const effectiveUserId = currentAuthId || (validated.userId && validated.userId !== "local-user" ? validated.userId : null);
+
+    logger.info(`Creating project "${validated.name}" for user ${effectiveUserId}`);
 
     // 1. Insert project
     const { data: project, error: pErr } = await supabase
@@ -28,7 +33,7 @@ export const projectsService = {
         description: validated.description ?? null,
         repo_url: validated.repo_url ?? null,
         default_branch: validated.default_branch,
-        created_by: validated.userId,
+        created_by: effectiveUserId,
       })
       .select("*")
       .single();
@@ -41,14 +46,14 @@ export const projectsService = {
     // 2. Add creator as project owner/lead member
     const { error: mErr } = await supabase.from("project_members").insert({
       project_id: project.id,
-      user_id: validated.userId,
-      display_name: validated.displayName,
+      user_id: effectiveUserId,
+      display_name: validated.displayName || authData?.user?.email?.split("@")[0] || "Team Lead",
       role: validated.role === "owner" || validated.role === "lead" ? validated.role : "lead",
       online: true,
     });
 
     if (mErr) {
-      logger.error("Failed to add project owner member", mErr, undefined, project.id, validated.userId);
+      logger.error("Failed to add project owner member", mErr, undefined, project.id, effectiveUserId ?? undefined);
       // Clean up project on failed member insert
       await supabase.from("projects").delete().eq("id", project.id);
       throw new DatabaseError("Failed to initialize project membership: " + mErr.message, mErr);
