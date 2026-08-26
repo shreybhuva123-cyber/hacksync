@@ -18,7 +18,18 @@ export function useWorkspace(explicitProjectId?: string | null) {
   return useQuery<Workspace | null, Error>({
     queryKey: [...WORKSPACE_KEY, targetId],
     queryFn: async () => {
-      if (!targetId) {
+      let validId = targetId;
+      if (
+        validId &&
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(validId)
+      ) {
+        if (typeof window !== "undefined") {
+          localStorage.removeItem("hacksync:active-project-id");
+        }
+        validId = null;
+      }
+
+      if (!validId) {
         // Look up first accessible project if no active ID selected
         const { data: { user } } = await supabase.auth.getUser();
         const userProjects = await workspaceRepository.getUserProjects(user?.id);
@@ -27,12 +38,14 @@ export function useWorkspace(explicitProjectId?: string | null) {
         return workspaceRepository.getWorkspace(firstProj.id);
       }
 
-      return workspaceRepository.getWorkspace(targetId);
+      return workspaceRepository.getWorkspace(validId);
     },
     staleTime: 10_000,
     retry: (failureCount, error) => {
-      // Don't retry on 404 Not Found
-      if (error.message.includes("not found")) return false;
+      // Don't retry on 404 Not Found or UUID syntax errors
+      if (error.message.includes("not found") || error.message.includes("invalid input syntax")) {
+        return false;
+      }
       return failureCount < 2;
     },
   });

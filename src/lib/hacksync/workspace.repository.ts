@@ -17,13 +17,17 @@ import type {
   Project,
   Task,
   Workspace,
-} from "./types";
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export const workspaceRepository = {
   /**
    * Fetch a single project by ID
    */
   async getProject(projectId: string): Promise<Project | null> {
+    if (!projectId || !UUID_REGEX.test(projectId)) {
+      return null;
+    }
+
     const { data, error } = await supabase
       .from("projects")
       .select("*")
@@ -122,7 +126,7 @@ export const workspaceRepository = {
       supabase.from("db_tables").select("*").eq("project_id", pid).order("name"),
       supabase.from("tasks").select("*").eq("project_id", pid).order("created_at", { ascending: false }),
       supabase.from("activity_events").select("*").eq("project_id", pid).order("created_at", { ascending: false }).limit(50),
-      supabase.from("code_nodes").select("*").eq("project_id", pid).order("file_path"),
+      supabase.from("code_nodes").select("*").eq("project_id", pid).order("path"),
       supabase.from("integration_links").select("*").eq("project_id", pid),
       supabase.from("git_branches").select("*").eq("project_id", pid),
       supabase.from("env_vars").select("*").eq("project_id", pid),
@@ -140,7 +144,7 @@ export const workspaceRepository = {
         .from("db_columns")
         .select("*")
         .in("table_id", tableIds)
-        .order("ordinal_position");
+        .order("created_at");
       columns = (cols as DbColumn[]) ?? [];
     }
 
