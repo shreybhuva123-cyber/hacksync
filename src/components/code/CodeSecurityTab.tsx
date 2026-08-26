@@ -63,11 +63,11 @@ export function CodeSecurityTab({ vulnerabilities }: CodeSecurityTabProps) {
                 {vuln.description}
               </p>
 
-              {vuln.owasp_category && (
+              {vuln.owasp && (
                 <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
                   <span className="font-semibold text-foreground">OWASP Category:</span>
                   <span className="mono rounded bg-muted px-1.5 py-0.5 font-bold text-foreground">
-                    {vuln.owasp_category}
+                    {vuln.owasp}
                   </span>
                 </div>
               )}

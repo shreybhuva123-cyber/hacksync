@@ -12,7 +12,12 @@ import { z } from "zod";
 const authFormSchema = z.object({
   email: z.string().trim().email("Please enter a valid email address."),
   password: z.string().min(6, "Password must be at least 6 characters."),
-  displayName: z.string().trim().min(2, "Display name must be at least 2 characters.").optional(),
+  displayName: z
+    .string()
+    .trim()
+    .min(2, "Display name must be at least 2 characters.")
+    .optional()
+    .or(z.literal("")),
 });
 
 export const Route = createFileRoute("/auth")({
@@ -75,7 +80,7 @@ function AuthPage() {
       const validated = authFormSchema.parse({
         email,
         password,
-        displayName: mode === "signup" ? name : undefined,
+        displayName: mode === "signup" ? (name.trim() || undefined) : undefined,
       });
 
       setBusy(true);
