@@ -272,6 +272,7 @@ export async function askWorkspaceCopilot(
   activeNode?: CodeNode | null,
   chatHistory: CopilotMessage[] = [],
   userId = "client-user",
+  modelPreference = "builtin",
 ): Promise<CopilotMessage> {
   // Enforce distributed rate limit
   const rateCheck = await aiAssistantLimiter.check(userId);
@@ -290,7 +291,7 @@ export async function askWorkspaceCopilot(
     content: m.content,
   }));
 
-  const { text, providerUsed } = await queryLLM(userQuery, ws, activeNode, historyTuples);
+  const { text, providerUsed } = await queryLLM(userQuery, ws, activeNode, historyTuples, modelPreference);
 
   return {
     id: `copilot-${Date.now()}`,

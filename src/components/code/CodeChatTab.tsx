@@ -93,13 +93,19 @@ export function CodeChatTab({
               }`}
             >
               <div
-                className={`max-w-[85%] rounded-lg p-3 text-xs leading-relaxed ${
+                className={`max-w-[90%] rounded-lg p-3 text-xs leading-relaxed ${
                   msg.sender === "user"
                     ? "bg-primary text-primary-foreground font-medium"
-                    : "bg-surface border border-border text-foreground"
+                    : "bg-surface border border-border text-foreground shadow-sm"
                 }`}
               >
-                <div className="whitespace-pre-wrap">{msg.text}</div>
+                {msg.sender === "user" ? (
+                  <div className="whitespace-pre-wrap">{msg.text}</div>
+                ) : (
+                  <div className="space-y-2 whitespace-pre-wrap leading-relaxed">
+                    {msg.text}
+                  </div>
+                )}
               </div>
               <span className="text-[10px] text-muted-foreground px-1 mt-0.5">{msg.time}</span>
             </div>

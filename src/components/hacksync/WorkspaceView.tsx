@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
 import { useWorkspace } from "@/lib/hacksync/workspace";
 import type { Workspace } from "@/lib/hacksync/types";
-import { EmptyState, ErrorState, LoadingState } from "./primitives";
+import { ErrorState, LoadingState } from "./primitives";
+import { NoWorkspaceOnboarding } from "./NoWorkspaceOnboarding";
 
 export function WorkspaceView({
   children,
@@ -26,12 +27,7 @@ export function WorkspaceView({
     );
   if (!data) {
     if (allowEmpty) return <>{children(null as unknown as Workspace)}</>;
-    return (
-      <EmptyState
-        title="No workspace yet"
-        description="You are not a member of any project. Ask your team lead for an invite code, or reload to join the shared demo workspace."
-      />
-    );
+    return <NoWorkspaceOnboarding />;
   }
   return <>{children(data)}</>;
 }

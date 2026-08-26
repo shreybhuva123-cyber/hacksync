@@ -52,7 +52,18 @@ export function AiCopilotModal({ isOpen, onClose }: { isOpen: boolean; onClose: 
   const [settings, setSettings] = useState<AISettings>(DEFAULT_AI_SETTINGS);
   const [showSettings, setShowSettings] = useState(false);
   const [tempProvider, setTempProvider] = useState<LLMProviderType>("builtin");
-  const [tempModel, setTempModel] = useState("gemini-2.0-flash");
+  const [customGeminiKey, setCustomGeminiKey] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("hacksync_gemini_key") || "";
+    }
+    return "";
+  });
+  const [customOpenaiKey, setCustomOpenaiKey] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("hacksync_openai_key") || "";
+    }
+    return "";
+  });
 
   const [messages, setMessages] = useState<CopilotMessage[]>([
     {
@@ -109,7 +120,14 @@ I have direct access to your repository structure, database schema, and live int
     setIsThinking(true);
 
     try {
-      const response = await askWorkspaceCopilot(text, ws ?? null, null, newHistory);
+      const response = await askWorkspaceCopilot(
+        text,
+        ws ?? null,
+        null,
+        newHistory,
+        "client-user",
+        settings.provider,
+      );
       setMessages((prev) => [...prev, response]);
     } catch {
       setMessages((prev) => [
@@ -133,6 +151,18 @@ I have direct access to your repository structure, database schema, and live int
       model: tempModel,
       temperature: 0.7,
     });
+    if (typeof window !== "undefined") {
+      if (customGeminiKey.trim()) {
+        localStorage.setItem("hacksync_gemini_key", customGeminiKey.trim());
+      } else {
+        localStorage.removeItem("hacksync_gemini_key");
+      }
+      if (customOpenaiKey.trim()) {
+        localStorage.setItem("hacksync_openai_key", customOpenaiKey.trim());
+      } else {
+        localStorage.removeItem("hacksync_openai_key");
+      }
+    }
     setShowSettings(false);
   };
 
@@ -292,7 +322,57 @@ I have direct access to your repository structure, database schema, and live int
                 <div className="font-semibold">🤖 OpenAI GPT-4o</div>
                 <p className="text-[10px] opacity-80 mt-0.5">Server Gateway (GPT-4o Mini)</p>
               </label>
-            </div>
+            {tempProvider === "gemini" && (
+              <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 space-y-1.5 animate-in fade-in">
+                <label className="text-[11px] font-semibold text-foreground flex items-center justify-between">
+                  <span>Custom Google Gemini API Key (Optional)</span>
+                  <a
+                    href="https://aistudio.google.com/app/apikey"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-primary hover:underline text-[10px]"
+                  >
+                    Get API Key ↗
+                  </a>
+                </label>
+                <input
+                  type="password"
+                  value={customGeminiKey}
+                  onChange={(e) => setCustomGeminiKey(e.target.value)}
+                  placeholder="AIzaSy..."
+                  className="w-full rounded border border-input bg-background px-2.5 py-1.5 text-xs outline-none focus:border-primary"
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  Saved securely in your browser's local storage. If omitted, falls back to the server gateway or built-in engine.
+                </p>
+              </div>
+            )}
+
+            {tempProvider === "openai" && (
+              <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 space-y-1.5 animate-in fade-in">
+                <label className="text-[11px] font-semibold text-foreground flex items-center justify-between">
+                  <span>Custom OpenAI API Key (Optional)</span>
+                  <a
+                    href="https://platform.openai.com/api-keys"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-primary hover:underline text-[10px]"
+                  >
+                    Get API Key ↗
+                  </a>
+                </label>
+                <input
+                  type="password"
+                  value={customOpenaiKey}
+                  onChange={(e) => setCustomOpenaiKey(e.target.value)}
+                  placeholder="sk-proj-..."
+                  className="w-full rounded border border-input bg-background px-2.5 py-1.5 text-xs outline-none focus:border-primary"
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  Saved securely in your browser's local storage.
+                </p>
+              </div>
+            )}
 
             <div className="flex justify-end gap-2 pt-1">
               <button
