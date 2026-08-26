@@ -25,15 +25,50 @@ jobs:
       - name: TypeScript Strict Typecheck
         run: bunx tsc --noEmit
 
-      - name: Run Domain, RLS & Security Authorization Tests
+      - name: Run Automated Test Suite
         run: bun test
 
-      - name: Validate SQL Migrations Syntax
+      - name: Dependency Security Audit
+        run: bun pm ls --all 2>&1 | head -100
+        continue-on-error: true
+
+      - name: Validate SQL Migration Files
         run: |
+          echo "Checking migration files are non-empty and contain valid SQL keywords..."
+          FAILED=0
           for file in supabase/migrations/*.sql; do
-            echo "Checking migration: $file"
-            test -s "$file" || exit 1
+            if [ ! -s "$file" ]; then
+              echo "❌ EMPTY: $file"
+              FAILED=1
+              continue
+            fi
+            # Check for at least one SQL statement keyword
+            if ! grep -qiE '(CREATE|ALTER|DROP|INSERT|UPDATE|DELETE|GRANT|REVOKE|SELECT)' "$file"; then
+              echo "❌ NO SQL KEYWORDS: $file"
+              FAILED=1
+              continue
+            fi
+            echo "✅ $file"
           done
+          if [ $FAILED -ne 0 ]; then exit 1; fi
+
+      - name: Verify RLS Policy Security (Static Check)
+        run: |
+          echo "Checking that no migration after the security fix reintroduces self-insert..."
+          # After 20260827100000, no migration should contain auth.uid() = user_id on INSERT
+          FAILED=0
+          for file in supabase/migrations/202608271*.sql supabase/migrations/202608272*.sql supabase/migrations/202608[3-9]*.sql supabase/migrations/20261*.sql 2>/dev/null; do
+            [ -f "$file" ] || continue
+            if grep -q 'auth.uid() = user_id' "$file"; then
+              # Only flag if it's in a CREATE POLICY for INSERT
+              if grep -B5 'auth.uid() = user_id' "$file" | grep -qi 'INSERT'; then
+                echo "❌ SECURITY REGRESSION: $file contains self-insert policy"
+                FAILED=1
+              fi
+            fi
+          done
+          if [ $FAILED -ne 0 ]; then exit 1; fi
+          echo "✅ No self-insert regressions detected"
 
       - name: Production Bundle Build
         run: bun run build

@@ -66,8 +66,8 @@ class SecurityAuditLogger {
     if (entry.projectId && entry.actorId) {
       void (async () => {
         try {
-          await supabase.from("security_audit_events").insert({
-            project_id: entry.projectId,
+          await (supabase.from as any)("security_audit_events").insert({
+            project_id: entry.projectId!,
             actor_id: entry.actorId,
             actor_role: entry.actorRole ?? null,
             action: entry.action,
@@ -80,6 +80,50 @@ class SecurityAuditLogger {
           // Non-blocking async persistence
         }
       })();
+    }
+
+    return entry;
+  }
+
+  /**
+   * Record a security-critical audit event with guaranteed persistence.
+   * Unlike log(), this method awaits the database insert and throws on failure.
+   * Use for: role changes, member removals, permission denials.
+   */
+  async logCritical(event: Omit<AuditLogEntry, "id" | "timestamp">): Promise<AuditLogEntry> {
+    const entry: AuditLogEntry = {
+      id: `audit-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      timestamp: new Date().toISOString(),
+      ...event,
+    };
+
+    // 1. Buffer in memory
+    this.inMemoryBuffer.unshift(entry);
+    if (this.inMemoryBuffer.length > this.maxBufferSize) {
+      this.inMemoryBuffer.pop();
+    }
+
+    // 2. Structured log output
+    if (process.env["NODE_ENV"] !== "test") {
+      console.info(`[SECURITY_AUDIT_CRITICAL] ${JSON.stringify(entry)}`);
+    }
+
+    // 3. AWAIT database persistence — throw on failure
+    if (entry.projectId && entry.actorId) {
+      const { error } = await (supabase.from as any)("security_audit_events").insert({
+        project_id: entry.projectId!,
+        actor_id: entry.actorId,
+        actor_role: entry.actorRole ?? null,
+        action: entry.action,
+        target_resource: entry.resourceId ?? null,
+        status: entry.status,
+        ip_address: entry.ipAddress ?? null,
+        metadata: entry.metadata ?? {},
+      });
+
+      if (error) {
+        throw new Error(`CRITICAL: Audit log persistence failed for action '${entry.action}': ${error.message}`);
+      }
     }
 
     return entry;

@@ -1,10 +1,10 @@
 # HackSync — Enterprise Hackathon Integration & Truth Control Center
 
 [![CI/CD Pipeline](https://img.shields.io/badge/CI%2FCD-passing-success)](https://github.com/hacksync/hacksync)
-[![Engineering Grade](https://img.shields.io/badge/Engineering_Grade-9.5%2F10-brightgreen)](#)
+[![Engineering Grade](https://img.shields.io/badge/Engineering_Grade-Audited-blue)](#)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0_Strict-blue)](https://www.typescriptlang.org/)
 [![Database](https://img.shields.io/badge/PostgreSQL-RLS_%26_RPCs-emerald)](https://supabase.com/)
-[![Tests](https://img.shields.io/badge/Tests-58_Passed_100%25-success)](#)
+[![Tests](https://img.shields.io/badge/Tests-Automated_Suite-success)](#)
 
 > **Three laptops. One connected codebase.**
 > HackSync is the single source of truth and real-time integration control center for distributed hackathon teams. Frontend, backend, and database engineers work independently in their local environments, while HackSync prevents drift, verifies API contracts, tracks PostgreSQL schemas, and audits cyber security vulnerabilities before the final demo.
@@ -46,7 +46,8 @@ $$\text{React Frontend} \longrightarrow \text{TanStack Query} \longrightarrow \t
 | **`member`** | Team Member | Read-only inspection of contracts, schema, tasks, and team presence. |
 
 ### Privilege Escalation Prevention
-- Self-service role modifications (`auth.uid() = user_id`) are permanently removed from RLS update policies.
+- Self-service role modifications (`auth.uid() = user_id`) are permanently removed from ALL RLS policies (INSERT, UPDATE, DELETE).
+- Project membership is invitation-only: joining requires a valid invite code validated by the `join_project_by_code` Security Definer RPC.
 - Role modifications strictly require `change_member_role` RPC verifying `can_manage_members(project_id)`.
 - Regular members are only permitted to update their own active presence (`online`, `working_area`, `branch_name`).
 
@@ -76,11 +77,11 @@ Contract Schema (JSON / Shape)
 
 ---
 
-## 🧪 Testing Pyramid (58 Tests, 100% Passing)
+## 🧪 Testing Pyramid (Automated Suite)
 
 ```
-                 [ Playwright E2E Tests ]
-                 (Login, Demo, Route Guards, History)
+                 [ Route Smoke Tests ]
+                 (HTTP Status, Response Validation)
               ┌───────────────────────────┐
              /  [ Integration & RLS Tests ] \
             /   (Multi-Tenant, RPCs, RBAC)   \

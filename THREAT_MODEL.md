@@ -5,7 +5,7 @@
 ```
 [Untrusted Client / Browser]
           │
-    (1) HTTPS / TLS 1.3 + Strict CSP (no unsafe-eval) + HSTS + X-Frame-Options: DENY
+    (1) HTTPS / TLS 1.3 + CSP (no unsafe-eval; uses unsafe-inline) + HSTS + X-Frame-Options: DENY
           ▼
 [Edge / CDN / Nitro Server Middleware]
     ├── Response Security Headers Injector
@@ -63,7 +63,7 @@
 - **Mitigation**:
   - Row Level Security (RLS) enabled across all database tables.
   - Every `SELECT`, `UPDATE`, `DELETE` policy evaluates `public.can_view_project(project_id)` or `public.can_edit_project(project_id)`.
-  - **Invitation-Only Membership**: Removed direct self-insertion (`OR auth.uid() = user_id`) on `project_members`. Joining requires either project manager invitation or valid token via `join_project_by_invite`.
+  - **Invitation-Only Membership**: ALL self-insertion policies (`OR auth.uid() = user_id`) permanently removed from `project_members` INSERT, UPDATE, and DELETE operations. Joining requires either project manager invitation, valid token via `join_project_by_invite`, or invite code via `join_project_by_code` RPC.
 
 ### 5. Denial of Service (Availability & Rate Limiting)
 - **Threat**: Automated attacker floods AI endpoints or mutation APIs across multiple server instances.

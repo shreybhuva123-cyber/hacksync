@@ -19,14 +19,16 @@ export interface RateLimiterOptions {
   prefix?: string;
   redisUrl?: string;
   redisToken?: string;
+  failMode?: "open" | "closed";
 }
 
 export class SlidingWindowRateLimiter {
   private windowMs: number;
   private maxRequests: number;
   private prefix: string;
-  private redisUrl?: string;
-  private redisToken?: string;
+  private redisUrl: string | undefined;
+  private redisToken: string | undefined;
+  private failMode: "open" | "closed";
   private localTimestamps: Map<string, number[]> = new Map();
 
   constructor(options: RateLimiterOptions) {
@@ -35,6 +37,7 @@ export class SlidingWindowRateLimiter {
     this.prefix = options.prefix ?? "rl";
     this.redisUrl = options.redisUrl ?? process.env["UPSTASH_REDIS_REST_URL"];
     this.redisToken = options.redisToken ?? process.env["UPSTASH_REDIS_REST_TOKEN"];
+    this.failMode = options.failMode ?? "open";
   }
 
   /**
@@ -50,8 +53,20 @@ export class SlidingWindowRateLimiter {
     if (this.redisUrl && this.redisToken) {
       try {
         return await this.checkRedis(fullKey, now);
-      } catch (err) {
-        // Fall through to resilient local fallback if Redis network request fails
+      } catch {
+        // Redis unavailable: behavior depends on fail mode
+        if (this.failMode === "closed") {
+          // Auth brute-force: deny request when Redis is down (fail-closed)
+          return {
+            allowed: false,
+            limit: this.maxRequests,
+            remaining: 0,
+            resetMs: this.windowMs,
+            retryAfterSeconds: Math.ceil(this.windowMs / 1000),
+            isDistributed: false,
+          };
+        }
+        // AI/API: fall through to local fallback (fail-open)
       }
     }
 
@@ -185,6 +200,7 @@ export const authBruteForceLimiter = new SlidingWindowRateLimiter({
   windowMs: 60 * 1000,
   maxRequests: 5,
   prefix: "auth",
+  failMode: "closed",
 });
 
 /**

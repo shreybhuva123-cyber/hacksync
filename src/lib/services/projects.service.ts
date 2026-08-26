@@ -127,13 +127,12 @@ export const projectsService = {
       return project as Project;
     }
 
-    // 3. Add as new member
-    const { error: joinErr } = await supabase.from("project_members").insert({
-      project_id: project.id,
-      user_id: validated.userId,
-      display_name: validated.displayName,
-      role: validated.role,
-      online: true,
+    // 3. Add as new member via secure RPC (no direct table INSERT — RLS blocks self-insert)
+    const joinRole = validated.role === "owner" ? "member" : validated.role;
+    const { error: joinErr } = await (supabase.rpc as any)("join_project_by_code", {
+      p_invite_code: validated.inviteCode,
+      p_display_name: validated.displayName,
+      p_role: joinRole,
     });
 
     if (joinErr) throw new DatabaseError(joinErr.message, joinErr);
@@ -142,7 +141,7 @@ export const projectsService = {
       project_id: project.id,
       kind: "member",
       actor: validated.displayName,
-      actor_role: validated.role,
+      actor_role: joinRole,
       message: `Joined project as ${validated.role} engineer`,
     });
 
