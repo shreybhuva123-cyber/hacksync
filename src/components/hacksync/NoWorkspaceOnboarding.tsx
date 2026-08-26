@@ -64,12 +64,105 @@ export function NoWorkspaceOnboarding() {
     setIsQuickstarting(true);
     try {
       const project = await createProject.mutateAsync({
-        name: "HackSync Starter Project",
+        name: "HackSync Starter Workspace",
         description: "Full-stack real-time collaboration workspace with contracts and schema.",
         role: "owner",
-        displayName: user?.email ? user.email.split("@")[0] || "Owner" : "Owner",
+        displayName: user?.email ? user.email.split("@")[0] || "Team Lead" : "Team Lead",
         userId: user?.id ?? "local-user",
       });
+
+      // Seed starter contracts, tables, and tasks in PostgreSQL
+      try {
+        await Promise.all([
+          // Starter API Contracts
+          import("@/integrations/supabase/client").then(({ supabase }) =>
+            supabase.from("api_contracts").insert([
+              {
+                project_id: project.id,
+                route: "/api/events",
+                method: "GET",
+                summary: "List all upcoming hackathon events",
+                description: "Returns an array of upcoming hackathon events with metadata.",
+                response_schema: '{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"title":{"type":"string"}}}}',
+                owner_role: "backend",
+                locked: true,
+                status: "implemented",
+                test_status: "passing",
+                version: "v1",
+              },
+              {
+                project_id: project.id,
+                route: "/api/events/:id/rsvp",
+                method: "POST",
+                summary: "RSVP to a specific event",
+                description: "Registers the current attendee for the designated event.",
+                request_schema: '{"type":"object","required":["attendeeId"],"properties":{"attendeeId":{"type":"string"}}}',
+                response_schema: '{"type":"object","properties":{"success":{"type":"boolean"}}}',
+                owner_role: "backend",
+                locked: true,
+                status: "agreed",
+                test_status: "passing",
+                version: "v1",
+              },
+            ]),
+          ),
+          // Starter DB Tables
+          import("@/integrations/supabase/client").then(({ supabase }) =>
+            supabase.from("db_tables").insert([
+              {
+                project_id: project.id,
+                name: "events",
+                description: "Hackathon scheduled events and workshops",
+                status: "migrated",
+                rls_enabled: true,
+              },
+              {
+                project_id: project.id,
+                name: "rsvps",
+                description: "RSVP attendee registration records",
+                status: "migrated",
+                rls_enabled: true,
+              },
+            ]),
+          ),
+          // Starter Tasks
+          import("@/integrations/supabase/client").then(({ supabase }) =>
+            supabase.from("tasks").insert([
+              {
+                project_id: project.id,
+                title: "Lock events GET API contract",
+                description: "Finalize OpenAPI request and response schema for event list.",
+                assigned_role: "backend",
+                status: "done",
+                priority: "high",
+              },
+              {
+                project_id: project.id,
+                title: "Connect Frontend EventList component",
+                description: "Bind React Query hook to /api/events endpoint.",
+                assigned_role: "frontend",
+                status: "in_progress",
+                priority: "high",
+              },
+            ]),
+          ),
+          // Starter Env Vars
+          import("@/integrations/supabase/client").then(({ supabase }) =>
+            supabase.from("env_vars").insert([
+              {
+                project_id: project.id,
+                key: "DATABASE_URL",
+                example_value: "postgresql://postgres:***@db.example.com:5432/postgres",
+                description: "Primary PostgreSQL connection string",
+                is_secret: true,
+                required_by: ["backend", "database"],
+              },
+            ]),
+          ),
+        ]);
+      } catch {
+        // Non-blocking fallback if auxiliary seeds fail
+      }
 
       setActiveProjectId(project.id);
       void navigate({ to: "/dashboard" });
