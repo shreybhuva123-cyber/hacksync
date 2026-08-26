@@ -519,3 +519,51 @@ BEGIN
   RETURN jsonb_build_object('success', true, 'removed_member_id', p_member_id);
 END; $$;
 GRANT EXECUTE ON FUNCTION public.remove_member_from_project(uuid) TO authenticated;
+
+-- 9. Seed 1 Standard Open Demo Project (CampusMesh)
+DO $$
+DECLARE
+  v_demo_id uuid := '00000000-0000-0000-0000-000000000001'::uuid;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM public.projects WHERE id = v_demo_id) THEN
+    INSERT INTO public.projects (
+      id, name, description, repo_url, default_branch, schema_version, invite_code, is_open_demo, demo_mode
+    ) VALUES (
+      v_demo_id,
+      'CampusMesh (Demo Workspace)',
+      'Campus event mesh built during hackathon with React, Node/Express and PostgreSQL.',
+      'https://github.com/hacksync/campusmesh',
+      'main',
+      'v2.1.0',
+      'DEMO99',
+      true,
+      true
+    );
+
+    -- Seed Members
+    INSERT INTO public.project_members (project_id, display_name, email, role, online) VALUES
+      (v_demo_id, 'Arjun Patel', 'arjun@campusmesh.dev', 'lead', true),
+      (v_demo_id, 'Priya Sharma', 'priya@campusmesh.dev', 'frontend', true),
+      (v_demo_id, 'Rahul Verma', 'rahul@campusmesh.dev', 'backend', true),
+      (v_demo_id, 'Meera Nair', 'meera@campusmesh.dev', 'database', false);
+
+    -- Seed Contracts
+    INSERT INTO public.api_contracts (project_id, route, method, summary, description, request_schema, response_schema, owner_role, locked, status, test_status, version) VALUES
+      (v_demo_id, '/api/events', 'GET', 'List campus events', 'Returns array of upcoming campus events', null, '{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"title":{"type":"string"}}}}', 'backend', true, 'implemented', 'passing', 'v1'),
+      (v_demo_id, '/api/events/:id/rsvp', 'POST', 'RSVP to event', 'Registers user attendance for event', '{"type":"object","required":["attendeeId"],"properties":{"attendeeId":{"type":"string"}}}', '{"type":"object","properties":{"success":{"type":"boolean"}}}', 'backend', true, 'agreed', 'passing', 'v1');
+
+    -- Seed Tables
+    INSERT INTO public.db_tables (project_id, name, description, status, rls_enabled) VALUES
+      (v_demo_id, 'events', 'Campus events table', 'migrated', true),
+      (v_demo_id, 'rsvps', 'RSVP records table', 'migrated', true);
+
+    -- Seed Tasks
+    INSERT INTO public.tasks (project_id, title, description, assigned_role, status, priority) VALUES
+      (v_demo_id, 'Lock events GET contract', 'Finalize OpenAPI schema for event listings', 'backend', 'done', 'high'),
+      (v_demo_id, 'Connect Frontend EventList component', 'Wire React component to live endpoint', 'frontend', 'in_progress', 'high');
+
+    -- Seed Env Vars
+    INSERT INTO public.env_vars (project_id, key, example_value, description, is_secret, required_by) VALUES
+      (v_demo_id, 'DATABASE_URL', 'postgresql://postgres:***@db.campusmesh.dev:5432/postgres', 'Primary database connection', true, ARRAY['backend','database']);
+  END IF;
+END $$;
