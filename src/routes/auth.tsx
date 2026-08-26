@@ -4,6 +4,9 @@ import { CheckCircle2, Loader2, Network, Zap, KeyRound, ArrowRight } from "lucid
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { StatusPill } from "@/components/hacksync/primitives";
+import { authBruteForceLimiter } from "@/lib/security/rate-limiter";
+import { auditLogger } from "@/lib/security/audit-logger";
+import { metrics } from "@/lib/observability/metrics";
 import { z } from "zod";
 
 const authFormSchema = z.object({
@@ -94,14 +97,46 @@ function AuthPage() {
           setSuccess("Account created! Please check your email to confirm your registration.");
         }
       } else {
+        // Enforce brute-force rate limit
+        const rateCheck = await authBruteForceLimiter.check(validated.email);
+        if (!rateCheck.allowed) {
+          metrics.incrementCounter("auth_failures");
+          auditLogger.log({
+            action: "RATE_LIMIT_EXCEEDED",
+            actorId: null,
+            status: "DENIED",
+            metadata: { email: validated.email, reason: "Brute force threshold exceeded" },
+          });
+          setError(
+            `Too many failed attempts. Please wait ${rateCheck.retryAfterSeconds ?? 60} seconds before attempting to sign in again.`,
+          );
+          return;
+        }
+
         const { data, error: signInErr } = await supabase.auth.signInWithPassword({
           email: validated.email,
           password: validated.password,
         });
 
-        if (signInErr) throw signInErr;
+        if (signInErr) {
+          metrics.incrementCounter("auth_failures");
+          auditLogger.log({
+            action: "AUTH_LOGIN_FAILURE",
+            actorId: null,
+            status: "FAILURE",
+            metadata: { email: validated.email, error: signInErr.message },
+          });
+          throw signInErr;
+        }
 
         if (data.session) {
+          await authBruteForceLimiter.reset(validated.email);
+          auditLogger.log({
+            action: "AUTH_LOGIN_SUCCESS",
+            actorId: data.user.id,
+            status: "SUCCESS",
+            metadata: { email: validated.email },
+          });
           void navigate({ to: redirectTo as any });
         }
       }

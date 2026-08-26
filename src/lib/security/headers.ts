@@ -1,7 +1,8 @@
 /**
- * HackSync Production Security Headers & CSP Configuration
- * Enforces strict Content-Security-Policy, HSTS, X-Frame-Options,
- * X-Content-Type-Options, Referrer-Policy, and Permissions-Policy.
+ * HackSync Production Security Headers & Strict CSP Configuration
+ * Enforces strict Content-Security-Policy (without unsafe-eval in production),
+ * HSTS, X-Frame-Options (DENY), X-Content-Type-Options (nosniff),
+ * Referrer-Policy, COOP, CORP, and Permissions-Policy.
  */
 
 export interface SecurityHeadersConfig {
@@ -10,12 +11,18 @@ export interface SecurityHeadersConfig {
 }
 
 export function getProductionSecurityHeaders(config?: SecurityHeadersConfig): Record<string, string> {
+  const isProd = config?.isProduction ?? (process.env["NODE_ENV"] === "production");
   const supabaseHost = config?.supabaseUrl ? new URL(config.supabaseUrl).host : "*.supabase.co";
+
+  // Production CSP strictly forbids unsafe-eval
+  const scriptDirectives = isProd
+    ? "script-src 'self' 'unsafe-inline'"
+    : "script-src 'self' 'unsafe-inline' 'unsafe-eval'";
 
   const cspDirectives = [
     "default-src 'self'",
     `connect-src 'self' https://${supabaseHost} wss://${supabaseHost} https://api.openai.com https://api.anthropic.com https://generativelanguage.googleapis.com`,
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval'", // Vite/TanStack SSR hydration
+    scriptDirectives,
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com data:",
     "img-src 'self' data: https: blob:",

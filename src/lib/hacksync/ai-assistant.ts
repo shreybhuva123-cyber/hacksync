@@ -263,13 +263,28 @@ export function analyzeCodeFile(node: CodeNode, ws: Workspace): CodeAnalysisResu
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { queryLLM } from "./llm-provider";
+import { aiAssistantLimiter } from "@/lib/security/rate-limiter";
+import { metrics } from "@/lib/observability/metrics";
 
 export async function askWorkspaceCopilot(
   userQuery: string,
   ws?: Workspace | null,
   activeNode?: CodeNode | null,
   chatHistory: CopilotMessage[] = [],
+  userId = "client-user",
 ): Promise<CopilotMessage> {
+  // Enforce distributed rate limit
+  const rateCheck = await aiAssistantLimiter.check(userId);
+  if (!rateCheck.allowed) {
+    metrics.incrementCounter("rate_limit_exceeded");
+    return {
+      id: `copilot-ratelimit-${Date.now()}`,
+      role: "assistant",
+      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      content: `⚠️ **Rate Limit Exceeded**: You have reached the maximum allowed AI queries (${rateCheck.limit}/min). Please wait **${rateCheck.retryAfterSeconds ?? 30} seconds** before submitting another request.`,
+    };
+  }
+
   const historyTuples = chatHistory.map((m) => ({
     role: m.role,
     content: m.content,

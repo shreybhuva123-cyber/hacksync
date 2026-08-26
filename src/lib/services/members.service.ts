@@ -23,6 +23,13 @@ export const membersService = {
       );
     }
 
+    // Strict hierarchy rule: Lead cannot promote anyone to owner
+    if (callerRole === "lead" && validatedRole === "owner") {
+      throw new AuthorizationError(
+        "Permission denied: Team leads cannot create or promote members to the owner role. Only existing project owners can assign the owner role.",
+      );
+    }
+
     // 1. Try server RPC function (with server-side SECURITY DEFINER check)
     try {
       const { data: rpcRes, error: rpcErr } = await (supabase.rpc as any)("change_member_role", {
@@ -57,6 +64,22 @@ export const membersService = {
     }
 
     return updated as Member;
+  },
+
+  /**
+   * Join a project securely using a valid invitation token.
+   */
+  async joinByInvite(inviteToken: string): Promise<{ success: boolean; projectId?: string; role?: string }> {
+    const { data, error } = await (supabase.rpc as any)("join_project_by_invite", {
+      p_invite_token: inviteToken,
+    });
+
+    if (error) {
+      logger.error("Failed to join project via invite", error);
+      throw new DatabaseError(error.message, error);
+    }
+
+    return data;
   },
 
   /**
