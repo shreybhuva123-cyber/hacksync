@@ -9,6 +9,7 @@ import { supabase } from "@/integrations/supabase/client";
 export type AuditAction =
   | "AUTH_LOGIN_SUCCESS"
   | "AUTH_LOGIN_FAILURE"
+  | "AUTH_REGISTER_SUCCESS"
   | "AUTH_LOGOUT"
   | "AUTH_PASSWORD_RESET"
   | "PROJECT_CREATED"
