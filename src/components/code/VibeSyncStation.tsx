@@ -18,8 +18,6 @@ export function VibeSyncStation({
   onScanNow,
   feedback,
 }: VibeSyncStationProps) {
-  if (!supportsFileSystemAccess()) return null;
-
   return (
     <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">

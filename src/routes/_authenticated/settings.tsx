@@ -45,6 +45,7 @@ import { canManageMembers, canDeleteProject } from "@/lib/hacksync/permissions";
 import { ROLES, ROLE_CONFIG, type Role } from "@/lib/constants/roles";
 import { InviteTeammatesModal } from "@/components/projects/InviteTeammatesModal";
 import {
+  pickDirectoryUniversal,
   pickLocalDirectory,
   scanLocalDirectory,
   getStoredDirectoryState,
@@ -233,23 +234,56 @@ function SettingsBody({ ws }: { ws: Workspace }) {
   const handleConnectLocalFolder = async () => {
     try {
       setIsConnectingDir(true);
-      const res = await pickLocalDirectory();
+      const res = await pickDirectoryUniversal();
       if (!res) {
         setIsConnectingDir(false);
         return;
       }
-      const scanned = await scanLocalDirectory(res.handle);
       const state: LocalDirectoryState = {
         connected: true,
         name: res.name,
-        fileCount: scanned.length,
+        fileCount: res.files.length,
         lastSyncedAt: new Date().toISOString(),
-        autoSync: true,
+        autoSync: Boolean(res.handle),
       };
       setLocalDir(state);
       saveStoredDirectoryState(state);
       setActiveDirectoryHandle(res.handle);
-      void logActivity(ws.project.id, "settings", `Connected local folder "${res.name}" with ${scanned.length} files`);
+
+      // Persist newly scanned nodes into Supabase code_nodes table
+      try {
+        for (const f of res.files.slice(0, 40)) {
+          insert.mutate({
+            table: "code_nodes",
+            values: {
+              project_id: ws.project.id,
+              path: f.path,
+              parent_path: f.path.includes("/") ? f.path.substring(0, f.path.lastIndexOf("/")) : null,
+              kind: "file",
+              area: f.area,
+              owner_role:
+                f.area === "frontend"
+                  ? "frontend"
+                  : f.area === "backend"
+                    ? "backend"
+                    : f.area === "database"
+                      ? "database"
+                      : "lead",
+              status: "implemented",
+              language: f.language,
+              content: f.content || null,
+            },
+          });
+        }
+      } catch {
+        // Non-blocking
+      }
+
+      void logActivity(
+        ws.project.id,
+        "settings",
+        `Connected local folder "${res.name}" with ${res.files.length} files`,
+      );
     } catch (err) {
       console.warn("Folder connect error:", err);
     } finally {

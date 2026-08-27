@@ -2,10 +2,9 @@ import { useState } from "react";
 import { Folder, HardDrive, Loader2, Sparkles, X } from "lucide-react";
 import { RoleBadge } from "@/components/hacksync/primitives";
 import {
-  pickLocalDirectory,
+  pickDirectoryUniversal,
   createProjectSubfolder,
   scaffoldInitialProjectFiles,
-  supportsFileSystemAccess,
   saveStoredDirectoryState,
 } from "@/lib/hacksync/local-filesystem";
 import type { Role } from "@/lib/hacksync/types";
@@ -45,7 +44,7 @@ export function CreateProjectModal({
 
   const handlePickDirectory = async () => {
     try {
-      const res = await pickLocalDirectory();
+      const res = await pickDirectoryUniversal();
       if (res) {
         setLocalDirHandle(res.handle);
         setLocalDirName(res.name);
@@ -91,14 +90,14 @@ export function CreateProjectModal({
           </button>
         </div>
 
-        {error ? (
-          <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
+        {error && (
+          <div className="rounded-lg bg-destructive/15 border border-destructive/30 p-2.5 text-xs text-destructive">
             {error}
           </div>
-        ) : null}
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-1.5">
+          <div className="space-y-1">
             <label className="block text-xs font-medium text-foreground">
               Project Name <span className="text-destructive">*</span>
             </label>
@@ -107,25 +106,23 @@ export function CreateProjectModal({
               required
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. CampusPulse, AI Voice Bot"
+              placeholder="e.g. AI MedScan, DefiPulse"
               className="w-full rounded-lg border border-input bg-background px-3 py-2 text-xs outline-none focus:border-primary"
             />
           </div>
 
-          <div className="space-y-1.5">
-            <label className="block text-xs font-medium text-foreground">
-              Description (Optional)
-            </label>
-            <input
-              type="text"
+          <div className="space-y-1">
+            <label className="block text-xs font-medium text-foreground">Description (Optional)</label>
+            <textarea
+              rows={2}
               value={desc}
               onChange={(e) => setDesc(e.target.value)}
-              placeholder="Short summary of the project goal"
-              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-xs outline-none focus:border-primary"
+              placeholder="Brief description of what you're building..."
+              className="w-full rounded-lg border border-input bg-background p-2.5 text-xs outline-none focus:border-primary"
             />
           </div>
 
-          <div className="space-y-1.5">
+          <div className="space-y-1">
             <label className="block text-xs font-medium text-foreground">
               GitHub Repo URL (Optional)
             </label>
@@ -138,31 +135,29 @@ export function CreateProjectModal({
             />
           </div>
 
-          {supportsFileSystemAccess() && (
-            <div className="space-y-2 rounded-lg border border-primary/20 bg-primary/5 p-3">
-              <div className="flex items-center justify-between">
-                <span className="flex items-center gap-1.5 text-xs font-semibold text-primary">
-                  <HardDrive className="size-3.5" /> Local Vibe Coding Directory
+          <div className="space-y-2 rounded-lg border border-primary/20 bg-primary/5 p-3">
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-1.5 text-xs font-semibold text-primary">
+                <HardDrive className="size-3.5" /> Local Vibe Coding Directory (Optional)
+              </span>
+              {localDirName && (
+                <span className="mono rounded bg-primary/20 px-2 py-0.5 text-[10px] font-bold text-primary">
+                  📁 {localDirName}
                 </span>
-                {localDirName && (
-                  <span className="mono rounded bg-primary/20 px-2 py-0.5 text-[10px] font-bold text-primary">
-                    📁 {localDirName}
-                  </span>
-                )}
-              </div>
-              <p className="text-[11px] text-muted-foreground">
-                Select your local project folder to enable live file synchronization with HackSync.
-              </p>
-              <button
-                type="button"
-                onClick={handlePickDirectory}
-                className="flex items-center gap-1.5 rounded-lg border border-primary/40 bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-primary/10"
-              >
-                <Folder className="size-3.5 text-primary" />
-                {localDirName ? `Change Folder (${localDirName})` : "Choose Workspace Folder"}
-              </button>
+              )}
             </div>
-          )}
+            <p className="text-[11px] text-muted-foreground">
+              Select your local project folder to enable live file synchronization with HackSync.
+            </p>
+            <button
+              type="button"
+              onClick={handlePickDirectory}
+              className="flex items-center gap-1.5 rounded-lg border border-primary/40 bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-primary/10"
+            >
+              <Folder className="size-3.5 text-primary" />
+              {localDirName ? `Change Folder (${localDirName})` : "Choose Workspace Folder"}
+            </button>
+          </div>
 
           <div className="space-y-1.5">
             <label className="block text-xs font-medium text-foreground">Your Role</label>

@@ -97,7 +97,7 @@ export async function pickLocalDirectory(): Promise<{
 } | null> {
   if (!supportsFileSystemAccess()) {
     throw new Error(
-      "Your browser does not support the File System Access API. Please use Chrome, Edge, Brave, or Opera for Vibe Coding.",
+      "Native File System Access API is not enabled in this browser. Falling back to universal folder picker.",
     );
   }
 
@@ -122,6 +122,149 @@ export async function pickLocalDirectory(): Promise<{
     }
     throw err;
   }
+}
+
+/**
+ * Universal HTML5 Directory Picker: Works in Brave, Firefox, Safari, Edge, Chrome without restrictions.
+ */
+export async function pickDirectoryViaInput(): Promise<{ name: string; files: ScannedFile[] } | null> {
+  return new Promise((resolve) => {
+    if (typeof document === "undefined") {
+      resolve(null);
+      return;
+    }
+
+    const input = document.createElement("input");
+    input.type = "file";
+    input.webkitdirectory = true;
+    (input as any).directory = true;
+    input.multiple = true;
+    input.style.display = "none";
+    document.body.appendChild(input);
+
+    input.onchange = async () => {
+      try {
+        const fileList = input.files;
+        if (!fileList || fileList.length === 0) {
+          resolve(null);
+          return;
+        }
+
+        const scanned: ScannedFile[] = [];
+        const readPromises: Promise<void>[] = [];
+        let folderName = "Local Project";
+
+        for (let i = 0; i < fileList.length; i++) {
+          const file = fileList[i];
+          if (!file) continue;
+
+          const rawPath = file.webkitRelativePath || file.name;
+          const parts = rawPath.split("/");
+
+          if (parts.length > 1 && parts[0]) {
+            folderName = parts[0];
+          }
+
+          // Strip root folder name if relative path: "project/src/index.ts" -> "src/index.ts"
+          const relativePath = parts.length > 1 ? parts.slice(1).join("/") : rawPath;
+
+          // Check ignored dirs / files
+          const hasIgnoredDir = parts.some((p) => IGNORED_DIRECTORIES.has(p));
+          if (hasIgnoredDir || IGNORED_FILES.has(file.name) || file.name.startsWith(".")) {
+            continue;
+          }
+
+          // Only read text files under 250KB
+          if (file.size > 250_000 || !isLikelyCodeFile(file.name)) {
+            continue;
+          }
+
+          const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+
+          readPromises.push(
+            file
+              .text()
+              .then((content) => {
+                scanned.push({
+                  path: relativePath,
+                  name: file.name,
+                  extension: ext,
+                  size: file.size,
+                  content,
+                  lastModified: file.lastModified,
+                  area: inferFileArea(relativePath),
+                  language: inferFileLanguage(ext),
+                });
+              })
+              .catch(() => {}),
+          );
+        }
+
+        await Promise.all(readPromises);
+        resolve({ name: folderName, files: scanned });
+      } catch (err) {
+        console.warn("HTML5 folder pick error:", err);
+        resolve(null);
+      } finally {
+        if (document.body.contains(input)) {
+          document.body.removeChild(input);
+        }
+      }
+    };
+
+    input.oncancel = () => {
+      if (document.body.contains(input)) {
+        document.body.removeChild(input);
+      }
+      resolve(null);
+    };
+
+    input.click();
+  });
+}
+
+/**
+ * Universal Folder Picker: Tries native showDirectoryPicker first; if unavailable or blocked by Brave/privacy shields,
+ * seamlessly opens standard HTML5 directory picker.
+ */
+export async function pickDirectoryUniversal(): Promise<{
+  handle: FileSystemDirectoryHandle | null;
+  name: string;
+  files: ScannedFile[];
+} | null> {
+  // 1. Try native File System Access API if supported and allowed
+  if (supportsFileSystemAccess()) {
+    try {
+      const picked = await pickLocalDirectory();
+      if (picked) {
+        const files = await scanLocalDirectory(picked.handle);
+        return { handle: picked.handle, name: picked.name, files };
+      }
+      return null;
+    } catch (err) {
+      if ((err as Error).name === "AbortError") return null;
+      // Fall through to HTML5 input picker on privacy block or permission error
+    }
+  }
+
+  // 2. HTML5 Directory Input Fallback (Works 100% in Brave, Firefox, Chrome, Safari)
+  const inputResult = await pickDirectoryViaInput();
+  if (inputResult) {
+    saveStoredDirectoryState({
+      connected: true,
+      name: inputResult.name,
+      fileCount: inputResult.files.length,
+      lastSyncedAt: new Date().toISOString(),
+      autoSync: false,
+    });
+    return {
+      handle: null,
+      name: inputResult.name,
+      files: inputResult.files,
+    };
+  }
+
+  return null;
 }
 
 export async function createProjectSubfolder(

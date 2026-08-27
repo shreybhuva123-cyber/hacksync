@@ -38,6 +38,7 @@ import { CodeChatTab } from "@/components/code/CodeChatTab";
 import { analyzeCodeFile, askWorkspaceCopilot } from "@/lib/hacksync/ai-assistant";
 import { auditWorkspaceSecurity } from "@/lib/hacksync/ai-security";
 import {
+  pickDirectoryUniversal,
   pickLocalDirectory,
   scanLocalDirectory,
   convertScannedFilesToCodeNodes,
@@ -128,25 +129,24 @@ function CodeBody({ ws }: { ws: Workspace }) {
     setIsEditing(false);
   }, [selected?.id, selected?.content]);
 
-  // Connect local folder
+  // Connect local folder (Supports Chrome, Brave, Firefox, Safari, Edge)
   const handleConnectDirectory = useCallback(async () => {
     try {
       setIsSyncing(true);
-      const res = await pickLocalDirectory();
+      const res = await pickDirectoryUniversal();
       if (!res) {
         setIsSyncing(false);
         return;
       }
 
-      const scanned = await scanLocalDirectory(res.handle);
-      const nodes = convertScannedFilesToCodeNodes(scanned, ws.project.id);
+      const nodes = convertScannedFilesToCodeNodes(res.files, ws.project.id);
       setLocalNodes(nodes);
       const state: LocalDirectoryState = {
         connected: true,
         name: res.name,
-        fileCount: scanned.length,
+        fileCount: res.files.length,
         lastSyncedAt: new Date().toISOString(),
-        autoSync: true,
+        autoSync: Boolean(res.handle),
       };
       setLocalDir(state);
       saveStoredDirectoryState(state);
@@ -155,15 +155,48 @@ function CodeBody({ ws }: { ws: Workspace }) {
         setSelectedId(nodes[0].id);
       }
 
-      setSyncFeedback(`Synced ${scanned.length} files from ${res.name}`);
-      void logActivity(ws.project.id, "code", `Connected local folder "${res.name}" with ${scanned.length} files`);
+      // Persist newly scanned nodes into Supabase code_nodes table
+      try {
+        for (const f of res.files.slice(0, 40)) {
+          insert.mutate({
+            table: "code_nodes",
+            values: {
+              project_id: ws.project.id,
+              path: f.path,
+              parent_path: f.path.includes("/") ? f.path.substring(0, f.path.lastIndexOf("/")) : null,
+              kind: "file",
+              area: f.area,
+              owner_role:
+                f.area === "frontend"
+                  ? "frontend"
+                  : f.area === "backend"
+                    ? "backend"
+                    : f.area === "database"
+                      ? "database"
+                      : "lead",
+              status: "implemented",
+              language: f.language,
+              content: f.content || null,
+            },
+          });
+        }
+      } catch {
+        // Non-blocking
+      }
+
+      setSyncFeedback(`Synced ${res.files.length} files from ${res.name}!`);
+      void logActivity(
+        ws.project.id,
+        "code",
+        `Connected local folder "${res.name}" with ${res.files.length} files`,
+      );
       setTimeout(() => setSyncFeedback(null), 3500);
     } catch (err) {
       setSyncFeedback(err instanceof Error ? err.message : "Failed to open local directory.");
     } finally {
       setIsSyncing(false);
     }
-  }, [ws.project.id]);
+  }, [ws.project.id, insert]);
 
   // Rescan & Sync from Local Disk
   const handleSyncFromDisk = useCallback(async () => {
