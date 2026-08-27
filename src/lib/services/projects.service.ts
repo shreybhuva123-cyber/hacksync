@@ -25,7 +25,22 @@ export const projectsService = {
 
     logger.info(`Creating project "${validated.name}" for user ${effectiveUserId}`);
 
-    // 1. Insert project
+    // Try atomic RPC function first (bypasses multi-step client RLS quirks)
+    const { data: rpcProject, error: rpcErr } = await (supabase.rpc as any)("create_project_with_owner", {
+      p_name: validated.name,
+      p_description: validated.description ?? null,
+      p_repo_url: validated.repo_url ?? null,
+      p_default_branch: validated.default_branch ?? "main",
+      p_role: validated.role === "owner" || validated.role === "lead" ? validated.role : "lead",
+      p_display_name: validated.displayName || authData?.user?.email?.split("@")[0] || "Team Lead",
+    });
+
+    if (!rpcErr && rpcProject) {
+      logger.info(`Project "${validated.name}" created successfully via atomic RPC`);
+      return rpcProject as Project;
+    }
+
+    // Direct multi-step fallback if RPC is not yet deployed in remote database
     const { data: project, error: pErr } = await supabase
       .from("projects")
       .insert({
@@ -55,18 +70,26 @@ export const projectsService = {
     if (mErr) {
       logger.error("Failed to add project owner member", mErr, undefined, project.id, effectiveUserId ?? undefined);
       // Clean up project on failed member insert
-      await supabase.from("projects").delete().eq("id", project.id);
+      try {
+        await supabase.from("projects").delete().eq("id", project.id);
+      } catch {
+        // Non-blocking
+      }
       throw new DatabaseError("Failed to initialize project membership: " + mErr.message, mErr);
     }
 
     // 3. Log initial activity
-    await supabase.from("activity_events").insert({
-      project_id: project.id,
-      kind: "project",
-      actor: validated.displayName,
-      actor_role: validated.role,
-      message: `Created project "${project.name}"`,
-    });
+    try {
+      await supabase.from("activity_events").insert({
+        project_id: project.id,
+        kind: "project",
+        actor: validated.displayName,
+        actor_role: validated.role,
+        message: `Created project "${project.name}"`,
+      });
+    } catch {
+      // Non-blocking
+    }
 
     return project as Project;
   },

@@ -15,6 +15,7 @@ import {
   Zap,
 } from "lucide-react";
 import { useWorkspace } from "@/lib/hacksync/workspace";
+import type { Workspace } from "@/lib/hacksync/types";
 import { askWorkspaceCopilot, type CopilotMessage } from "@/lib/hacksync/ai-assistant";
 import {
   DEFAULT_AI_SETTINGS,

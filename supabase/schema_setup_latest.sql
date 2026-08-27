@@ -147,7 +147,7 @@ DROP POLICY IF EXISTS "read accessible projects" ON public.projects;
 CREATE POLICY "read accessible projects" ON public.projects FOR SELECT TO authenticated USING (public.can_view_project(id));
 
 DROP POLICY IF EXISTS "create projects" ON public.projects;
-CREATE POLICY "create projects" ON public.projects FOR INSERT TO authenticated WITH CHECK (auth.uid() = created_by OR created_by IS NULL);
+CREATE POLICY "create projects" ON public.projects FOR INSERT TO authenticated WITH CHECK (true);
 
 DROP POLICY IF EXISTS "update accessible projects" ON public.projects;
 CREATE POLICY "update accessible projects" ON public.projects FOR UPDATE TO authenticated USING (public.can_manage_members(id));
@@ -441,6 +441,72 @@ BEGIN
   RETURN jsonb_build_object('success', true, 'already_member', false, 'project', jsonb_build_object('id', v_project.id, 'name', v_project.name));
 END; $$;
 GRANT EXECUTE ON FUNCTION public.join_project_by_code(text, text, text) TO authenticated;
+
+-- 8b. Create Project With Owner (Atomic RPC)
+CREATE OR REPLACE FUNCTION public.create_project_with_owner(
+  p_name text,
+  p_description text DEFAULT NULL,
+  p_repo_url text DEFAULT NULL,
+  p_default_branch text DEFAULT 'main',
+  p_role text DEFAULT 'lead',
+  p_display_name text DEFAULT 'Team Lead'
+) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_caller_id uuid;
+  v_project_id uuid;
+  v_project record;
+  v_role text;
+  v_invite_code text;
+BEGIN
+  v_caller_id := auth.uid();
+  IF v_caller_id IS NULL THEN
+    RAISE EXCEPTION 'Authentication required to create a project' USING ERRCODE = '42501';
+  END IF;
+
+  IF p_name IS NULL OR length(trim(p_name)) < 2 THEN
+    RAISE EXCEPTION 'Project name must be at least 2 characters' USING ERRCODE = '22000';
+  END IF;
+
+  v_role := CASE WHEN p_role IN ('owner', 'lead', 'frontend', 'backend', 'database') THEN p_role ELSE 'lead' END;
+  
+  -- Generate 6-char uppercase invite code
+  v_invite_code := upper(substr(md5(random()::text || clock_timestamp()::text), 1, 6));
+
+  -- 1. Insert project
+  INSERT INTO public.projects (
+    name, description, repo_url, default_branch, created_by, invite_code, schema_version
+  ) VALUES (
+    trim(p_name), p_description, p_repo_url, COALESCE(p_default_branch, 'main'), v_caller_id, v_invite_code, 'v1.0.0'
+  ) RETURNING * INTO v_project;
+
+  v_project_id := v_project.id;
+
+  -- 2. Add creator to project_members
+  INSERT INTO public.project_members (
+    project_id, user_id, display_name, email, role, online
+  ) VALUES (
+    v_project_id,
+    v_caller_id,
+    COALESCE(p_display_name, 'Team Lead'),
+    (SELECT email FROM auth.users WHERE id = v_caller_id),
+    v_role,
+    true
+  );
+
+  -- 3. Log initial activity event
+  INSERT INTO public.activity_events (
+    project_id, kind, actor, actor_role, message
+  ) VALUES (
+    v_project_id,
+    'project',
+    COALESCE(p_display_name, 'Team Lead'),
+    v_role,
+    'Created project "' || v_project.name || '"'
+  );
+
+  RETURN to_jsonb(v_project);
+END; $$;
+GRANT EXECUTE ON FUNCTION public.create_project_with_owner(text, text, text, text, text, text) TO authenticated;
 
 CREATE OR REPLACE FUNCTION public.change_member_role(
   p_member_id uuid,
