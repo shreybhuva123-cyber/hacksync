@@ -69,9 +69,11 @@ jobs:
           FAILED=0
           for file in supabase/migrations/202608271*.sql supabase/migrations/202608272*.sql supabase/migrations/202608[3-9]*.sql supabase/migrations/20261*.sql 2>/dev/null; do
             [ -f "$file" ] || continue
-            if grep -q 'auth.uid() = user_id' "$file"; then
-              # Only flag if it's in a CREATE POLICY for INSERT
-              if grep -B5 'auth.uid() = user_id' "$file" | grep -qi 'INSERT'; then
+            # Strip SQL comment lines before checking — prevents false positives
+            # from comments explaining the security fix itself
+            if grep -v '^\s*--' "$file" | grep -q 'auth.uid() = user_id'; then
+              # Only flag if it's in a CREATE POLICY for INSERT (non-comment lines)
+              if grep -v '^\s*--' "$file" | grep -B5 'auth.uid() = user_id' | grep -qi 'INSERT'; then
                 echo "❌ SECURITY REGRESSION: $file contains self-insert policy"
                 FAILED=1
               fi
