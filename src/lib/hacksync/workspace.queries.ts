@@ -20,11 +20,6 @@ export function useWorkspace(explicitProjectId?: string | null) {
   return useQuery<Workspace | null, Error>({
     queryKey: [...WORKSPACE_KEY, targetId],
     queryFn: async () => {
-      const isDemoMode =
-        typeof window !== "undefined" &&
-        (localStorage.getItem("hacksync:demo-mode") === "true" ||
-          window.location.search.includes("demo=true"));
-
       let validId = targetId;
       if (
         validId &&
@@ -42,11 +37,9 @@ export function useWorkspace(explicitProjectId?: string | null) {
           data: { user },
         } = await supabase.auth.getUser();
 
-        if (!user && isDemoMode) {
-          return DEMO_WORKSPACE;
-        }
+        if (!user) return null;
 
-        const userProjects = await workspaceRepository.getUserProjects(user?.id);
+        const userProjects = await workspaceRepository.getUserProjects(user.id);
         const firstProj = userProjects[0];
 
         if (!firstProj && user) {

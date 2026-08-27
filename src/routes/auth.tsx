@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
-import { CheckCircle2, Loader2, Network, Zap, KeyRound, ArrowRight, Sparkles } from "lucide-react";
+import { CheckCircle2, Loader2, Network, Zap, KeyRound, ArrowRight, ShieldCheck } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { StatusPill } from "@/components/hacksync/primitives";
@@ -57,13 +57,6 @@ function AuthPage() {
     }
   }, [session, navigate, redirectTo]);
 
-  const handleInstantDemoAccess = () => {
-    if (typeof window !== "undefined") {
-      localStorage.setItem("hacksync:demo-mode", "true");
-    }
-    void navigate({ to: redirectTo as any });
-  };
-
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -104,10 +97,16 @@ function AuthPage() {
         if (signUpErr) throw signUpErr;
 
         if (data.session) {
+          auditLogger.log({
+            action: "AUTH_REGISTER_SUCCESS",
+            actorId: data.user?.id ?? null,
+            status: "SUCCESS",
+            metadata: { email: validated.email },
+          });
           void navigate({ to: redirectTo as any });
         } else {
-          // If email confirmation is required by Supabase project settings
-          setSuccess("Account created successfully! You can also use Instant Access below to enter immediately.");
+          setSuccess("Account created successfully! Please verify your email or sign in with your password.");
+          setMode("signin");
         }
       } else {
         // Enforce brute-force rate limit
@@ -209,18 +208,17 @@ function AuthPage() {
         </div>
 
         <div className="panel p-5 space-y-4">
-          {/* Instant 1-Click Workspace Access */}
-          <button
-            type="button"
-            onClick={handleInstantDemoAccess}
-            className="flex w-full items-center justify-between rounded-lg border border-primary/40 bg-gradient-to-r from-primary/15 via-primary/10 to-primary/5 p-3 text-xs font-bold text-primary hover:bg-primary/20 transition-all shadow-sm group"
+          {/* Isolated Public Demo Sandbox Link for Judges */}
+          <Link
+            to="/demo"
+            className="flex w-full items-center justify-between rounded-lg border border-primary/30 bg-primary/10 p-3 text-xs font-semibold text-primary hover:bg-primary/20 transition-colors"
           >
             <div className="flex items-center gap-2">
-              <Sparkles className="size-4 text-primary animate-pulse" />
-              <span>⚡ Enter Instant Workspace (1-Click Access)</span>
+              <Zap className="size-4 fill-primary" />
+              <span>Explore Public Demo Sandbox</span>
             </div>
-            <ArrowRight className="size-3.5 group-hover:translate-x-0.5 transition-transform" />
-          </button>
+            <ArrowRight className="size-3.5" />
+          </Link>
 
           {/* Mode Switcher */}
           <div className="grid grid-cols-3 gap-1 rounded-lg bg-muted p-1">
@@ -281,32 +279,19 @@ function AuthPage() {
             ) : null}
 
             {success ? (
-              <div className="space-y-2 rounded-md border border-success/40 bg-success/10 p-3">
-                <div className="flex items-start gap-2">
-                  <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-success" />
-                  <p className="text-xs text-success font-medium">{success}</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleInstantDemoAccess}
-                  className="w-full rounded bg-success/20 py-1 text-center text-xs font-bold text-success hover:bg-success/30 transition-colors"
-                >
-                  👉 Click Here to Enter Workspace Now
-                </button>
+              <div className="flex items-start gap-2 rounded-md border border-success/40 bg-success/10 px-3 py-2">
+                <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-success" />
+                <p className="text-xs text-success">{success}</p>
               </div>
             ) : null}
 
             {error ? (
-              <div className="space-y-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
-                <p role="alert">{error}</p>
-                <button
-                  type="button"
-                  onClick={handleInstantDemoAccess}
-                  className="w-full rounded bg-primary/20 py-1 text-center font-bold text-primary hover:bg-primary/30 transition-colors"
-                >
-                  ⚡ Bypass & Enter Instant Workspace
-                </button>
-              </div>
+              <p
+                role="alert"
+                className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+              >
+                {error}
+              </p>
             ) : null}
 
             <button
@@ -341,6 +326,11 @@ function AuthPage() {
               </button>
             </>
           ) : null}
+        </div>
+
+        <div className="mt-4 flex items-center justify-center gap-1.5 text-center text-[11px] text-muted-foreground">
+          <ShieldCheck className="size-3.5 text-success" />
+          <span>Strict Supabase JWT authentication & PostgreSQL RLS enforced</span>
         </div>
       </div>
     </div>

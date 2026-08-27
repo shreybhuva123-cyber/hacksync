@@ -3,21 +3,18 @@ import { supabase } from "@/integrations/supabase/client";
 import { AppShell } from "@/components/hacksync/AppShell";
 import { logger } from "@/lib/errors";
 
+/**
+ * Enterprise Authenticated Layout Route Guard
+ * Strictly verifies real Supabase JWT session with the auth server.
+ * Zero client-side bypass: all protected routes require authenticated credentials.
+ */
 export const Route = createFileRoute("/_authenticated")({
   ssr: false,
   beforeLoad: async ({ location }) => {
     try {
-      const searchObj = location.search as Record<string, unknown> | undefined;
-      const isDemoMode =
-        typeof window !== "undefined" &&
-        (localStorage.getItem("hacksync:demo-mode") === "true" ||
-          searchObj?.["demo"] === "true" ||
-          searchObj?.["demo"] === true ||
-          location.href?.includes("demo=true"));
-
       const { data, error } = await supabase.auth.getUser();
 
-      if ((error || !data.user) && !isDemoMode) {
+      if (error || !data?.user) {
         logger.info("Unauthenticated route access attempt, redirecting to /auth", {
           path: location.pathname,
         });
@@ -28,7 +25,8 @@ export const Route = createFileRoute("/_authenticated")({
           },
         });
       }
-      return { user: data?.user ?? null };
+
+      return { user: data.user };
     } catch (err) {
       if ((err as { isRedirect?: boolean })?.isRedirect) throw err;
       throw redirect({
