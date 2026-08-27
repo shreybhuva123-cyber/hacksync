@@ -4,9 +4,11 @@ import {
   Bot,
   Bug,
   Check,
+  Download,
   FileCode2,
   Folder,
   FolderPlus,
+  HardDrive,
   Laptop,
   Lightbulb,
   Loader2,
@@ -46,6 +48,9 @@ import {
   saveStoredDirectoryState,
   writeNestedFileByPath,
   getActiveDirectoryHandle,
+  exportWorkspaceToZip,
+  syncWorkspaceFilesToLocalDisk,
+  downloadSingleFile,
   type LocalDirectoryState,
 } from "@/lib/hacksync/local-filesystem";
 import { logActivity, useRowInsert, useRowMutation, useRowDelete } from "@/lib/hacksync/workspace";
@@ -59,7 +64,7 @@ export const Route = createFileRoute("/_authenticated/code")({
       {
         name: "description",
         content:
-          "Shared project file tree with in-browser editor, local disk sync, AI code explainer, bug detector, and cyber security analyzer.",
+          "Shared project file tree with in-browser editor, local disk sync, zip export, AI code explainer, bug detector, and cyber security analyzer.",
       },
       { property: "og:title", content: "Files & Code Explorer — HackSync" },
       {
@@ -88,6 +93,7 @@ function CodeBody({ ws }: { ws: Workspace }) {
   const [localNodes, setLocalNodes] = useState<CodeNode[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editBuffer, setEditBuffer] = useState("");
@@ -225,6 +231,48 @@ function CodeBody({ ws }: { ws: Workspace }) {
     }
   }, [ws.project.id, handleConnectDirectory]);
 
+  // 1-Click Push All Project Files to Local Disk Folder
+  const handlePushAllToDisk = async () => {
+    const handle = getActiveDirectoryHandle();
+    if (!handle) {
+      await handleConnectDirectory();
+      return;
+    }
+
+    try {
+      setIsSaving(true);
+      const res = await syncWorkspaceFilesToLocalDisk(handle, displayNodes);
+      setSyncFeedback(`Exported ${res.written} files to folder "${localDir.name}" on your disk!`);
+      void logActivity(ws.project.id, "code", `Pushed ${res.written} files directly to disk folder ${localDir.name}`);
+      setTimeout(() => setSyncFeedback(null), 4000);
+    } catch (err) {
+      setSyncFeedback(err instanceof Error ? err.message : "Failed to write files to disk.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // 1-Click Download Project as .ZIP Archive
+  const handleDownloadZip = async () => {
+    if (displayNodes.length === 0) {
+      setSyncFeedback("No files to download yet.");
+      setTimeout(() => setSyncFeedback(null), 3000);
+      return;
+    }
+
+    try {
+      setIsExporting(true);
+      await exportWorkspaceToZip(ws.project.name, displayNodes);
+      setSyncFeedback(`Downloaded ${ws.project.name}.zip to your computer!`);
+      void logActivity(ws.project.id, "code", `Downloaded project zip archive for ${ws.project.name}`);
+      setTimeout(() => setSyncFeedback(null), 4000);
+    } catch (err) {
+      setSyncFeedback(err instanceof Error ? err.message : "Failed to download ZIP.");
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   // Push edited code to Supabase AND Local Disk
   const handleSaveFile = async () => {
     if (!selected) return;
@@ -337,8 +385,16 @@ function CodeBody({ ws }: { ws: Workspace }) {
         insert.mutate({ table: "code_nodes", values: f });
       }
 
+      // If local disk directory handle is connected, write to local folder immediately
+      const handle = getActiveDirectoryHandle();
+      if (handle) {
+        for (const f of starterFiles) {
+          await writeNestedFileByPath(handle, f.path, f.content);
+        }
+      }
+
       void logActivity(ws.project.id, "code", `Scaffolded starter project files for ${ws.project.name}`);
-      setSyncFeedback("Scaffolded 4 starter files!");
+      setSyncFeedback("Scaffolded 4 starter files! You can download or edit them anytime.");
       setTimeout(() => setSyncFeedback(null), 3500);
     } catch (err) {
       setSyncFeedback("Failed to scaffold files.");
@@ -373,6 +429,8 @@ function CodeBody({ ws }: { ws: Workspace }) {
       html: "html",
     };
 
+    const initialContent = newFileContent || `// ${cleanPath}\n`;
+
     insert.mutate(
       {
         table: "code_nodes",
@@ -385,11 +443,17 @@ function CodeBody({ ws }: { ws: Workspace }) {
           owner_role: newFileRole,
           status: "in_progress",
           language: langMap[ext] || "text",
-          content: newFileContent || `// ${cleanPath}\n`,
+          content: initialContent,
         },
       },
       {
-        onSuccess: () => {
+        onSuccess: async () => {
+          // If disk handle connected, write to disk too
+          const handle = getActiveDirectoryHandle();
+          if (handle) {
+            await writeNestedFileByPath(handle, cleanPath, initialContent);
+          }
+
           void logActivity(ws.project.id, "code", `Created new file ${cleanPath}`);
           setShowNewFileModal(false);
           setNewFilePath("");
@@ -466,9 +530,21 @@ function CodeBody({ ws }: { ws: Workspace }) {
       <PageHeader
         eyebrow="code & ai intelligence"
         title="Files & Code Explorer"
-        description="Shared project file tree with in-browser editor, local disk sync, AI code explainer, line-targeted bug diagnostics, and cyber security scanner."
+        description="Shared project file tree with in-browser editor, local disk sync, 1-click ZIP export, AI code explainer, and cyber security scanner."
         actions={
           <div className="flex items-center gap-2">
+            {displayNodes.length > 0 && (
+              <button
+                type="button"
+                onClick={handleDownloadZip}
+                disabled={isExporting}
+                title="Download entire project as .ZIP archive"
+                className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-accent transition-colors shadow-sm"
+              >
+                {isExporting ? <Loader2 className="size-3.5 animate-spin" /> : <Download className="size-3.5 text-primary" />}
+                <span>Download (.zip)</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setShowNewFileModal(true)}
@@ -510,22 +586,35 @@ function CodeBody({ ws }: { ws: Workspace }) {
               <p className="text-[11px] text-muted-foreground mt-0.5">
                 {localDir.connected
                   ? `📁 ${localDir.name} · ${displayNodes.length} files synchronized`
-                  : "Connect your local project folder to enable two-way live sync with VS Code & Cursor"}
+                  : "Connect your local folder to sync files with VS Code & Cursor, or download project as .ZIP anytime"}
               </p>
             </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
             {!localDir.connected ? (
-              <button
-                type="button"
-                onClick={handleConnectDirectory}
-                disabled={isSyncing}
-                className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:opacity-90 shadow-sm transition-opacity"
-              >
-                <Folder className="size-3.5" />
-                Connect Local Folder
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={handleConnectDirectory}
+                  disabled={isSyncing}
+                  className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:opacity-90 shadow-sm transition-opacity"
+                >
+                  <Folder className="size-3.5" />
+                  Connect Local Folder
+                </button>
+                {displayNodes.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleDownloadZip}
+                    disabled={isExporting}
+                    className="flex items-center gap-1.5 rounded-lg border border-border bg-secondary px-3 py-1.5 text-xs font-semibold hover:bg-accent transition-colors"
+                  >
+                    <Download className="size-3.5 text-primary" />
+                    Download (.zip)
+                  </button>
+                )}
+              </>
             ) : (
               <>
                 <button
@@ -539,6 +628,17 @@ function CodeBody({ ws }: { ws: Workspace }) {
                     className={`size-3.5 text-primary ${isSyncing ? "animate-spin" : ""}`}
                   />
                   Sync from Disk
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => void handlePushAllToDisk()}
+                  disabled={isSaving}
+                  title="Export and write all workspace files to your local folder on disk"
+                  className="flex items-center gap-1.5 rounded-lg border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/20 transition-colors"
+                >
+                  <HardDrive className="size-3.5" />
+                  Push to Disk
                 </button>
 
                 <button
@@ -569,7 +669,7 @@ function CodeBody({ ws }: { ws: Workspace }) {
         </div>
 
         {syncFeedback ? (
-          <div className="flex items-center gap-2 rounded-md bg-primary/10 px-3 py-1 text-xs text-primary font-medium animate-in fade-in">
+          <div className="flex items-center gap-2 rounded-md bg-primary/10 px-3 py-1.5 text-xs text-primary font-medium animate-in fade-in">
             <Sparkles className="size-3" />
             {syncFeedback}
           </div>

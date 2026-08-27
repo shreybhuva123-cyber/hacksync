@@ -38,6 +38,25 @@ export function CodeEditorView({
 
           <button
             type="button"
+            onClick={() => {
+              const blob = new Blob([isEditing ? editBuffer : content], { type: "text/plain;charset=utf-8" });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = node.path.split("/").pop() || "file.txt";
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              URL.revokeObjectURL(url);
+            }}
+            title="Download file to computer"
+            className="flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:bg-accent transition-colors"
+          >
+            <span>Download</span>
+          </button>
+
+          <button
+            type="button"
             onClick={onToggleEdit}
             className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium border transition-colors ${
               isEditing

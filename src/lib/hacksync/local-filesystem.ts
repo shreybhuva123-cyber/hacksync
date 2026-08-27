@@ -520,3 +520,72 @@ export function convertScannedFilesToCodeNodes(
     updated_at: new Date(f.lastModified).toISOString(),
   }));
 }
+
+/**
+ * Downloads a single file directly to the user's computer.
+ */
+export function downloadSingleFile(filePath: string, content: string) {
+  if (typeof window === "undefined") return;
+  const fileName = filePath.split("/").pop() || "file.txt";
+  const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Packs all workspace code nodes into a zip archive and triggers browser download.
+ */
+export async function exportWorkspaceToZip(projectName: string, nodes: CodeNode[]): Promise<void> {
+  if (typeof window === "undefined") return;
+  const JSZip = (await import("jszip")).default;
+  const zip = new JSZip();
+
+  const fileNodes = nodes.filter((n) => n.kind === "file");
+  if (fileNodes.length === 0) {
+    throw new Error("No files to export in this workspace.");
+  }
+
+  for (const node of fileNodes) {
+    const cleanPath = node.path.replace(/^\//, "");
+    zip.file(cleanPath, node.content || "");
+  }
+
+  const blob = await zip.generateAsync({ type: "blob" });
+  const safeName = projectName.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-") || "hacksync-project";
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${safeName}.zip`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Writes all workspace code nodes directly to a connected local directory handle on disk.
+ */
+export async function syncWorkspaceFilesToLocalDisk(
+  dirHandle: FileSystemDirectoryHandle,
+  nodes: CodeNode[],
+): Promise<{ written: number; failed: number }> {
+  const fileNodes = nodes.filter((n) => n.kind === "file");
+  let written = 0;
+  let failed = 0;
+
+  for (const node of fileNodes) {
+    const content = node.content ?? "";
+    const ok = await writeNestedFileByPath(dirHandle, node.path, content);
+    if (ok) written++;
+    else failed++;
+  }
+
+  return { written, failed };
+}
+
