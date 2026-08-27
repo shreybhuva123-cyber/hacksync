@@ -68,7 +68,8 @@ jobs:
           # After 20260827100000, no migration should contain auth.uid() = user_id on INSERT
           # The fix migration itself (20260827100000) is excluded from this check
           FAILED=0
-          for file in supabase/migrations/202608271*.sql supabase/migrations/202608272*.sql supabase/migrations/202608[3-9]*.sql supabase/migrations/20261*.sql 2>/dev/null; do
+          shopt -s nullglob
+          for file in supabase/migrations/202608271*.sql supabase/migrations/202608272*.sql supabase/migrations/202608[3-9]*.sql supabase/migrations/20261*.sql; do
             [ -f "$file" ] || continue
             # Skip the security fix migration itself — it mentions the pattern in comments
             case "$file" in *20260827100000*) continue ;; esac
