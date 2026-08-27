@@ -86,4 +86,39 @@ describe("Contract Engine (Single Source of Truth Verification)", () => {
     expect(spec.paths["/api/users"]).toBeDefined();
     expect(spec.paths["/api/users"].get.summary).toBe("Get users");
   });
+
+  it("should synthesize realistic JSON mock data from array and object JSON schema", () => {
+    const arraySchema = JSON.stringify({
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          title: { type: "string" },
+        },
+      },
+    });
+
+    const mockData = contractEngine.generateMockData(arraySchema) as any[];
+    expect(Array.isArray(mockData)).toBe(true);
+    expect(mockData.length).toBeGreaterThan(0);
+    expect(typeof mockData[0].id).toBe("string");
+    expect(typeof mockData[0].title).toBe("string");
+    expect(mockData[0].title).not.toContain("type");
+  });
+
+  it("should synthesize realistic mock data from object JSON schema", () => {
+    const objSchema = JSON.stringify({
+      type: "object",
+      properties: {
+        success: { type: "boolean" },
+        attendeeId: { type: "string" },
+      },
+    });
+
+    const mockObj = contractEngine.generateMockData(objSchema) as any;
+    expect(typeof mockObj).toBe("object");
+    expect(mockObj.success).toBe(true);
+    expect(typeof mockObj.attendeeId).toBe("string");
+  });
 });

@@ -127,6 +127,104 @@ export class ContractEngine {
       },
     };
   }
+
+  /**
+   * Generate realistic synthetic JSON mock data based on a JSON Schema or raw sample definition.
+   */
+  generateMockData(schemaStr: string | null | undefined): unknown {
+    if (!schemaStr || schemaStr.trim() === "" || schemaStr === "null") {
+      return { status: "success", timestamp: new Date().toISOString() };
+    }
+
+    try {
+      const parsed = typeof schemaStr === "string" ? JSON.parse(schemaStr) : schemaStr;
+      if (typeof parsed !== "object" || parsed === null) {
+        return parsed;
+      }
+
+      return this.synthesizeValue(parsed);
+    } catch {
+      return { status: "success", raw: schemaStr };
+    }
+  }
+
+  private synthesizeValue(node: any, fieldName = ""): any {
+    if (!node || typeof node !== "object") return node;
+
+    // Standard JSON Schema with explicit type
+    if (typeof node.type === "string") {
+      switch (node.type.toLowerCase()) {
+        case "array": {
+          const itemSchema = node.items ?? { type: "string" };
+          return [
+            this.synthesizeValue(itemSchema, `${fieldName || "item"}_1`),
+            this.synthesizeValue(itemSchema, `${fieldName || "item"}_2`),
+          ];
+        }
+        case "object": {
+          if (node.properties && typeof node.properties === "object") {
+            const obj: Record<string, any> = {};
+            for (const [key, propDef] of Object.entries(node.properties)) {
+              obj[key] = this.synthesizeValue(propDef, key);
+            }
+            return obj;
+          }
+          return {};
+        }
+        case "string": {
+          if (node.enum && Array.isArray(node.enum) && node.enum.length > 0) {
+            return node.enum[0];
+          }
+          const lower = fieldName.toLowerCase();
+          if (node.format === "date-time" || lower.includes("time") || lower.includes("date") || lower.includes("at")) {
+            return "2026-08-27T12:00:00.000Z";
+          }
+          if (lower.includes("email")) return "alex@campusmesh.dev";
+          if (lower.includes("url") || lower.includes("link")) return "https://github.com/hacksync/project";
+          if (lower.includes("attendee") || lower.includes("user")) return "usr_8923a1";
+          if (lower.includes("id")) return `${fieldName.slice(0, 3) || "evt"}_${Math.random().toString(36).substring(2, 6)}`;
+          if (lower.includes("title") || lower.includes("name")) {
+            if (lower.includes("event") || lower.includes("hack")) return "Hackathon Opening Keynote & Team Formation";
+            return "Main Stage Workshop";
+          }
+          if (lower.includes("desc") || lower.includes("summary")) return "Hands-on engineering workshop with live API and database synchronization.";
+          if (lower.includes("role")) return "lead";
+          if (lower.includes("status")) return "active";
+          return node.example ?? node.default ?? "sample_value";
+        }
+        case "number":
+        case "integer": {
+          const lower = fieldName.toLowerCase();
+          if (lower.includes("count") || lower.includes("total") || lower.includes("attendees")) return 42;
+          if (lower.includes("status") || lower.includes("code")) return 200;
+          if (lower.includes("score") || lower.includes("grade")) return 98;
+          return node.example ?? node.default ?? 100;
+        }
+        case "boolean": {
+          return node.example ?? node.default ?? true;
+        }
+        default:
+          return node.example ?? null;
+      }
+    }
+
+    // If node is an object with nested property mappings (e.g. { id: "string", title: "string" })
+    if (!node.type && !node.properties) {
+      const obj: Record<string, any> = {};
+      for (const [key, val] of Object.entries(node)) {
+        if (typeof val === "string") {
+          obj[key] = this.synthesizeValue({ type: val }, key);
+        } else if (typeof val === "object" && val !== null) {
+          obj[key] = this.synthesizeValue(val, key);
+        } else {
+          obj[key] = val;
+        }
+      }
+      return obj;
+    }
+
+    return node;
+  }
 }
 
 export const contractEngine = new ContractEngine();

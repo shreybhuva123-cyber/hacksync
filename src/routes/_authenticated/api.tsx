@@ -29,6 +29,7 @@ import {
 } from "@/components/hacksync/primitives";
 import { logActivity, useRowMutation } from "@/lib/hacksync/workspace";
 import { generateTypeScriptSDK } from "@/lib/hacksync/conflict-radar";
+import { contractEngine } from "@/lib/contracts/contract-engine";
 import type { ApiContract, Workspace } from "@/lib/hacksync/types";
 
 export const Route = createFileRoute("/_authenticated/api")({
@@ -62,11 +63,15 @@ function ApiBody({ ws }: { ws: Workspace }) {
   const [showSdkModal, setShowSdkModal] = useState(false);
   const [activeTab, setActiveTab] = useState<"spec" | "mock" | "sdk">("spec");
 
+  const selected: ApiContract | undefined =
+    ws.contracts.find((c) => c.id === selectedId) ?? ws.contracts[0];
+
   // Mock Sandbox State
-  const [mockStatus, setMockStatus] = useState<number>(200);
+  const [mockStatus, setMockStatus] = useState<number>(() =>
+    selected?.method === "POST" ? 201 : 200,
+  );
   const [mockLatency, setMockLatency] = useState<number>(120);
   const [mockReqBody, setMockReqBody] = useState<string>("");
-  const [mockAuthHeader, setMockAuthHeader] = useState<boolean>(true);
   const [mockResponse, setMockResponse] = useState<{
     status: number;
     timeMs: number;
@@ -74,8 +79,14 @@ function ApiBody({ ws }: { ws: Workspace }) {
   } | null>(null);
   const [isRunningMock, setIsRunningMock] = useState(false);
 
-  const selected: ApiContract | undefined =
-    ws.contracts.find((c) => c.id === selectedId) ?? ws.contracts[0];
+  const mockEndpointUrl = useMemo(() => {
+    if (!selected) return "http://localhost:8080/api/mock";
+    const cleanRoute = selected.route.startsWith("/api")
+      ? selected.route.slice(4)
+      : selected.route;
+    return `http://localhost:8080/api/mock${cleanRoute}`;
+  }, [selected]);
+
   const update = useRowMutation();
 
   const toggleLock = (c: ApiContract) => {
@@ -99,13 +110,36 @@ function ApiBody({ ws }: { ws: Workspace }) {
     setMockResponse(null);
 
     setTimeout(() => {
-      let respBody = selected?.response_schema || '{"status": "success"}';
+      let respBody = "";
       if (mockStatus === 401) {
-        respBody = '{"error": "Unauthorized", "message": "Missing Bearer token"}';
+        respBody = JSON.stringify(
+          { error: "Unauthorized", message: "Missing or invalid Bearer token in Authorization header" },
+          null,
+          2,
+        );
       } else if (mockStatus === 400) {
-        respBody = '{"error": "Bad Request", "details": ["Invalid parameters provided"]}';
+        respBody = JSON.stringify(
+          {
+            error: "Bad Request",
+            message: "Payload validation failed against API contract schema",
+            details: ["Missing required parameters or malformed JSON body"],
+          },
+          null,
+          2,
+        );
       } else if (mockStatus === 500) {
-        respBody = '{"error": "Internal Server Error", "code": "DB_CONNECTION_TIMEOUT"}';
+        respBody = JSON.stringify(
+          {
+            error: "Internal Server Error",
+            code: "MOCK_GATEWAY_TIMEOUT",
+            trace_id: `trace_${Math.random().toString(36).slice(2, 9)}`,
+          },
+          null,
+          2,
+        );
+      } else {
+        const synthetic = contractEngine.generateMockData(selected?.response_schema);
+        respBody = typeof synthetic === "string" ? synthetic : JSON.stringify(synthetic, null, 2);
       }
 
       setMockResponse({
@@ -312,9 +346,9 @@ function ApiBody({ ws }: { ws: Workspace }) {
                   </div>
                   <div className="flex items-center gap-2">
                     <div className="flex-1 truncate rounded-md bg-secondary/80 px-2.5 py-1.5 text-xs mono text-foreground">
-                      {`http://localhost:8080/api/mock${selected.route}`}
+                      {mockEndpointUrl}
                     </div>
-                    <CopyButton value={`http://localhost:8080/api/mock${selected.route}`} />
+                    <CopyButton value={mockEndpointUrl} />
                   </div>
                   <p className="text-[10px] text-muted-foreground">
                     Frontend devs can call this endpoint directly in React/Vite with zero waiting
@@ -332,7 +366,7 @@ function ApiBody({ ws }: { ws: Workspace }) {
                       <button
                         type="button"
                         onClick={() => {
-                          const curl = `curl -X ${selected.method} "http://localhost:8080/api/mock${selected.route}" ${
+                          const curl = `curl -X ${selected.method} "${mockEndpointUrl}" ${
                             selected.auth_required
                               ? '-H "Authorization: Bearer mock_jwt_token"'
                               : ""
@@ -406,13 +440,13 @@ function ApiBody({ ws }: { ws: Workspace }) {
                         type="button"
                         onClick={() => {
                           if (selected.request_schema) {
-                            setMockReqBody(selected.request_schema);
+                            const sample = contractEngine.generateMockData(selected.request_schema);
+                            setMockReqBody(typeof sample === "string" ? sample : JSON.stringify(sample, null, 2));
                           } else {
                             setMockReqBody(
                               JSON.stringify(
                                 {
-                                  id: "usr_hacksync_" + Math.random().toString(36).substring(2, 7),
-                                  name: "Alex Developer",
+                                  attendeeId: "usr_hacksync_" + Math.random().toString(36).substring(2, 7),
                                   role: "lead",
                                   timestamp: new Date().toISOString(),
                                 },
