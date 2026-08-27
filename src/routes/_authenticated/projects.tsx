@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { WorkspaceView } from "@/components/hacksync/WorkspaceView";
 import { PageHeader } from "@/components/hacksync/primitives";
@@ -50,6 +50,19 @@ function ProjectsBody() {
 
   const [showCreate, setShowCreate] = useState(false);
   const [showJoin, setShowJoin] = useState(false);
+  const [joinCode, setJoinCode] = useState("");
+
+  // Check URL query parameters for ?join=CODE
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const code = params.get("join");
+      if (code && code.trim()) {
+        setJoinCode(code.trim().toUpperCase());
+        setShowJoin(true);
+      }
+    }
+  }, []);
 
   const handleCreate = async (input: {
     name: string;
@@ -128,9 +141,13 @@ function ProjectsBody() {
 
       <JoinProjectModal
         isOpen={showJoin}
-        onClose={() => setShowJoin(false)}
+        onClose={() => {
+          setShowJoin(false);
+          setJoinCode("");
+        }}
         onSubmit={handleJoin}
         isLoading={joinProject.isPending}
+        initialInviteCode={joinCode}
       />
     </div>
   );

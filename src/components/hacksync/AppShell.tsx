@@ -24,6 +24,7 @@ import {
   Sparkles,
   Terminal,
   Trophy,
+  UserPlus,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -34,6 +35,7 @@ import { computeReadiness, computeWarnings } from "@/lib/hacksync/analysis";
 import { auditWorkspaceSecurity } from "@/lib/hacksync/ai-security";
 import { RoleBadge, StatusPill } from "./primitives";
 import { AiCopilotModal } from "./AiCopilotModal";
+import { InviteTeammatesModal } from "@/components/projects/InviteTeammatesModal";
 import { TopTimerWidget } from "@/components/timer";
 
 const NAV: { group: string; items: { to: string; label: string; icon: typeof Boxes }[] }[] = [
@@ -60,7 +62,7 @@ const NAV: { group: string; items: { to: string; label: string; icon: typeof Box
   {
     group: "Code & Git",
     items: [
-      { to: "/code", label: "Code Explorer", icon: FileCode2 },
+      { to: "/code", label: "Files & Code", icon: FileCode2 },
       { to: "/git", label: "Git & Branches", icon: GitBranch },
       { to: "/handoffs", label: "Handoff Cards", icon: Sparkles },
       { to: "/setup", label: "Setup & Workflow", icon: Terminal },
@@ -80,6 +82,7 @@ const NAV: { group: string; items: { to: string; label: string; icon: typeof Box
 export function AppShell({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const [copilotOpen, setCopilotOpen] = useState(false);
+  const [inviteOpen, setInviteOpen] = useState(false);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -262,6 +265,19 @@ export function AppShell({ children }: { children: ReactNode }) {
             {/* Hackathon Top Countdown / Stopwatch Timer & Activity History */}
             <TopTimerWidget />
 
+            {/* Invite Teammates Action Button */}
+            {ws ? (
+              <button
+                type="button"
+                onClick={() => setInviteOpen(true)}
+                className="flex items-center gap-1.5 rounded-lg border border-border bg-secondary/80 px-2.5 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-accent"
+                title="Invite Teammates with 1-Click Link or Code"
+              >
+                <UserPlus className="size-3.5 text-primary" />
+                <span className="hidden sm:inline">Invite Teammates</span>
+              </button>
+            ) : null}
+
             {/* AI Copilot Action Button */}
             <button
               type="button"
@@ -321,6 +337,15 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       {/* Global AI Copilot Modal */}
       <AiCopilotModal isOpen={copilotOpen} onClose={() => setCopilotOpen(false)} />
+
+      {/* Invite Teammates Modal */}
+      {ws ? (
+        <InviteTeammatesModal
+          isOpen={inviteOpen}
+          onClose={() => setInviteOpen(false)}
+          workspace={ws}
+        />
+      ) : null}
     </div>
   );
 }

@@ -10,6 +10,7 @@ interface JoinProjectModalProps {
   onClose: () => void;
   onSubmit: (input: { inviteCode: string; role: Role }) => Promise<void>;
   isLoading: boolean;
+  initialInviteCode?: string;
 }
 
 export function JoinProjectModal({
@@ -17,8 +18,9 @@ export function JoinProjectModal({
   onClose,
   onSubmit,
   isLoading,
+  initialInviteCode = "",
 }: JoinProjectModalProps) {
-  const [inviteCode, setInviteCode] = useState("");
+  const [inviteCode, setInviteCode] = useState(initialInviteCode);
   const [role, setRole] = useState<Role>("frontend");
   const [error, setError] = useState<string | null>(null);
 
