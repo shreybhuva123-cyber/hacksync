@@ -68,6 +68,10 @@ export function useAuth(): AuthState {
 
 export async function signOut(): Promise<void> {
   try {
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("hacksync:demo-mode");
+      localStorage.removeItem("hacksync:active-project-id");
+    }
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
   } catch (err) {

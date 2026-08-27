@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
-import { CheckCircle2, Loader2, Network, Zap, KeyRound, ArrowRight } from "lucide-react";
+import { CheckCircle2, Loader2, Network, Zap, KeyRound, ArrowRight, Sparkles } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { StatusPill } from "@/components/hacksync/primitives";
@@ -57,6 +57,13 @@ function AuthPage() {
     }
   }, [session, navigate, redirectTo]);
 
+  const handleInstantDemoAccess = () => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("hacksync:demo-mode", "true");
+    }
+    void navigate({ to: redirectTo as any });
+  };
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -99,7 +106,8 @@ function AuthPage() {
         if (data.session) {
           void navigate({ to: redirectTo as any });
         } else {
-          setSuccess("Account created! Please check your email to confirm your registration.");
+          // If email confirmation is required by Supabase project settings
+          setSuccess("Account created successfully! You can also use Instant Access below to enter immediately.");
         }
       } else {
         // Enforce brute-force rate limit
@@ -201,17 +209,18 @@ function AuthPage() {
         </div>
 
         <div className="panel p-5 space-y-4">
-          {/* Isolated Demo Sandbox Link for Judges */}
-          <Link
-            to="/demo"
-            className="flex w-full items-center justify-between rounded-lg border border-primary/40 bg-primary/10 p-3 text-xs text-primary hover:bg-primary/20 transition-colors"
+          {/* Instant 1-Click Workspace Access */}
+          <button
+            type="button"
+            onClick={handleInstantDemoAccess}
+            className="flex w-full items-center justify-between rounded-lg border border-primary/40 bg-gradient-to-r from-primary/15 via-primary/10 to-primary/5 p-3 text-xs font-bold text-primary hover:bg-primary/20 transition-all shadow-sm group"
           >
-            <div className="flex items-center gap-2 font-semibold">
-              <Zap className="size-4 fill-primary" />
-              <span>Explore Instant Demo Sandbox</span>
+            <div className="flex items-center gap-2">
+              <Sparkles className="size-4 text-primary animate-pulse" />
+              <span>⚡ Enter Instant Workspace (1-Click Access)</span>
             </div>
-            <ArrowRight className="size-3.5" />
-          </Link>
+            <ArrowRight className="size-3.5 group-hover:translate-x-0.5 transition-transform" />
+          </button>
 
           {/* Mode Switcher */}
           <div className="grid grid-cols-3 gap-1 rounded-lg bg-muted p-1">
@@ -272,19 +281,32 @@ function AuthPage() {
             ) : null}
 
             {success ? (
-              <div className="flex items-start gap-2 rounded-md border border-success/40 bg-success/10 px-3 py-2">
-                <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-success" />
-                <p className="text-xs text-success">{success}</p>
+              <div className="space-y-2 rounded-md border border-success/40 bg-success/10 p-3">
+                <div className="flex items-start gap-2">
+                  <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-success" />
+                  <p className="text-xs text-success font-medium">{success}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleInstantDemoAccess}
+                  className="w-full rounded bg-success/20 py-1 text-center text-xs font-bold text-success hover:bg-success/30 transition-colors"
+                >
+                  👉 Click Here to Enter Workspace Now
+                </button>
               </div>
             ) : null}
 
             {error ? (
-              <p
-                role="alert"
-                className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
-              >
-                {error}
-              </p>
+              <div className="space-y-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
+                <p role="alert">{error}</p>
+                <button
+                  type="button"
+                  onClick={handleInstantDemoAccess}
+                  className="w-full rounded bg-primary/20 py-1 text-center font-bold text-primary hover:bg-primary/30 transition-colors"
+                >
+                  ⚡ Bypass & Enter Instant Workspace
+                </button>
+              </div>
             ) : null}
 
             <button

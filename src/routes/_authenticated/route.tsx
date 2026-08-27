@@ -7,10 +7,13 @@ export const Route = createFileRoute("/_authenticated")({
   ssr: false,
   beforeLoad: async ({ location }) => {
     try {
+      const searchObj = location.search as Record<string, unknown> | undefined;
       const isDemoMode =
         typeof window !== "undefined" &&
         (localStorage.getItem("hacksync:demo-mode") === "true" ||
-          location.search.includes("demo=true"));
+          searchObj?.["demo"] === "true" ||
+          searchObj?.["demo"] === true ||
+          location.href?.includes("demo=true"));
 
       const { data, error } = await supabase.auth.getUser();
 

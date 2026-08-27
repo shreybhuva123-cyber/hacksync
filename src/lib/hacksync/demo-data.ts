@@ -207,10 +207,13 @@ export const DEMO_WORKSPACE: Workspace = {
     {
       id: "lnk1",
       project_id: "demo-sandbox-project",
-      from_node_id: "code-1",
-      to_node_id: "code-2",
+      feature_name: "Events API Integration",
+      frontend_path: "src/pages/Events.tsx",
       contract_id: "c1",
-      kind: "calls_api",
+      tables: ["events"],
+      status: "healthy",
+      notes: "Frontend connected to GET /api/events and events table",
+      updated_at: new Date().toISOString(),
     },
   ],
   branches: [
@@ -226,7 +229,7 @@ export const DEMO_WORKSPACE: Workspace = {
       last_commit_sha: "7d95a28f",
       last_commit_message: "feat: Add Local File Workspace, CodeSync Engine & GitHub Push Integration",
       integration_ready: true,
-      last_pushed_at: new Date().toISOString(),
+      last_commit_at: new Date().toISOString(),
     },
     {
       id: "b2",
@@ -240,7 +243,7 @@ export const DEMO_WORKSPACE: Workspace = {
       last_commit_sha: "a3b8901",
       last_commit_message: "feat: Add Events list grid and responsive cards",
       integration_ready: true,
-      last_pushed_at: new Date().toISOString(),
+      last_commit_at: new Date().toISOString(),
     },
     {
       id: "b3",
@@ -254,7 +257,7 @@ export const DEMO_WORKSPACE: Workspace = {
       last_commit_sha: "f1039bc",
       last_commit_message: "feat: Lock GET /api/events response schema",
       integration_ready: true,
-      last_pushed_at: new Date().toISOString(),
+      last_commit_at: new Date().toISOString(),
     },
     {
       id: "b4",
@@ -268,7 +271,7 @@ export const DEMO_WORKSPACE: Workspace = {
       last_commit_sha: "d9910ae",
       last_commit_message: "migration: Add rsvps cascade constraints",
       integration_ready: true,
-      last_pushed_at: new Date().toISOString(),
+      last_commit_at: new Date().toISOString(),
     },
   ],
   envVars: [],
