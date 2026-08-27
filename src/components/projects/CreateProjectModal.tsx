@@ -3,8 +3,6 @@ import { Folder, HardDrive, Loader2, Sparkles, X } from "lucide-react";
 import { RoleBadge } from "@/components/hacksync/primitives";
 import {
   pickDirectoryUniversal,
-  createProjectSubfolder,
-  scaffoldInitialProjectFiles,
   saveStoredDirectoryState,
 } from "@/lib/hacksync/local-filesystem";
 import type { Role } from "@/lib/hacksync/types";

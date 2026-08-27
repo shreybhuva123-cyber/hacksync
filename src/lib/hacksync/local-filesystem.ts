@@ -469,6 +469,43 @@ export async function writeNestedFileByPath(
   }
 }
 
+export async function createProjectSubfolder(
+  parentHandle: FileSystemDirectoryHandle,
+  projectName: string,
+): Promise<FileSystemDirectoryHandle> {
+  const safeName = projectName.trim().replace(/[^a-zA-Z0-9_-]/g, "_") || "project";
+  return await parentHandle.getDirectoryHandle(safeName, { create: true });
+}
+
+export async function scaffoldInitialProjectFiles(
+  dirHandle: FileSystemDirectoryHandle,
+  projectName: string,
+  role: Role,
+): Promise<void> {
+  const readmeContent = `# ${projectName}\n\nHackathon project managed via HackSync.\n\n## Team Role\n- Primary Track: ${role}\n`;
+  await writeRawFileToHandle(dirHandle, "README.md", readmeContent);
+
+  if (role === "frontend") {
+    await writeNestedFileByPath(
+      dirHandle,
+      "src/App.tsx",
+      `import React from "react";\n\nexport function App() {\n  return (\n    <main className="min-h-screen p-8">\n      <h1 className="text-2xl font-bold">${projectName}</h1>\n      <p>Frontend initialized</p>\n    </main>\n  );\n}\nexport default App;\n`,
+    );
+  } else if (role === "backend") {
+    await writeNestedFileByPath(
+      dirHandle,
+      "src/server.ts",
+      `import express from "express";\n\nconst app = express();\napp.use(express.json());\n\napp.get("/health", (_req, res) => {\n  res.json({ status: "ok", service: "${projectName}" });\n});\n\nconst PORT = process.env.PORT || 3000;\napp.listen(PORT, () => console.log(\`Server running on port \${PORT}\`));\n`,
+    );
+  } else if (role === "database") {
+    await writeNestedFileByPath(
+      dirHandle,
+      "db/schema.sql",
+      `-- Initial database schema for ${projectName}\nCREATE TABLE IF NOT EXISTS users (\n  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n  email TEXT UNIQUE NOT NULL,\n  created_at TIMESTAMPTZ DEFAULT now()\n);\n`,
+    );
+  }
+}
+
 export async function scanLocalDirectory(
   dirHandle: FileSystemDirectoryHandle,
   prefix = "",
