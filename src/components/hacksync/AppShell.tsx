@@ -21,6 +21,7 @@ import {
   Settings,
   ShieldAlert,
   ShieldCheck,
+  Sliders,
   Sparkles,
   Terminal,
   Trophy,
@@ -38,12 +39,24 @@ import { AiCopilotModal } from "./AiCopilotModal";
 import { InviteTeammatesModal } from "@/components/projects/InviteTeammatesModal";
 import { TopTimerWidget } from "@/components/timer";
 
-const NAV: { group: string; items: { to: string; label: string; icon: typeof Boxes }[] }[] = [
+interface NavItem {
+  to: string;
+  label: string;
+  icon: typeof LayoutDashboard;
+  badge?: string | number;
+}
+
+interface NavGroup {
+  group: string;
+  items: NavItem[];
+}
+
+const NAV: NavGroup[] = [
   {
-    group: "Command",
+    group: "Overview",
     items: [
-      { to: "/dashboard", label: "Team Workspace", icon: LayoutDashboard },
-      { to: "/pitch", label: "Judge Pitch Mode", icon: Trophy },
+      { to: "/dashboard", label: "Cockpit", icon: LayoutDashboard },
+      { to: "/pitch", label: "Judge Pitch & Demo", icon: Trophy },
       { to: "/security", label: "Cyber Security", icon: ShieldAlert },
       { to: "/architecture", label: "Architecture Map", icon: Boxes },
       { to: "/integrations", label: "Integration Map", icon: Network },
@@ -74,6 +87,7 @@ const NAV: { group: string; items: { to: string; label: string; icon: typeof Box
       { to: "/tasks", label: "Tasks", icon: ListChecks },
       { to: "/activity", label: "Activity Feed", icon: Activity },
       { to: "/projects", label: "Projects", icon: FolderKanban },
+      { to: "/project-settings", label: "Project Settings", icon: Sliders },
       { to: "/settings", label: "Settings", icon: Settings },
     ],
   },
