@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { projectsService } from "@/lib/services";
 import { workspaceRepository } from "./workspace.repository";
 import { useActiveProjectId } from "@/hooks/useActiveProject";
+import { DEMO_WORKSPACE } from "./demo-data";
 import type { Workspace, Project } from "./types";
 
 export const WORKSPACE_KEY = ["hacksync", "workspace"] as const;
@@ -19,6 +20,11 @@ export function useWorkspace(explicitProjectId?: string | null) {
   return useQuery<Workspace | null, Error>({
     queryKey: [...WORKSPACE_KEY, targetId],
     queryFn: async () => {
+      const isDemoMode =
+        typeof window !== "undefined" &&
+        (localStorage.getItem("hacksync:demo-mode") === "true" ||
+          window.location.search.includes("demo=true"));
+
       let validId = targetId;
       if (
         validId &&
@@ -35,6 +41,11 @@ export function useWorkspace(explicitProjectId?: string | null) {
         const {
           data: { user },
         } = await supabase.auth.getUser();
+
+        if (!user && isDemoMode) {
+          return DEMO_WORKSPACE;
+        }
+
         const userProjects = await workspaceRepository.getUserProjects(user?.id);
         const firstProj = userProjects[0];
 

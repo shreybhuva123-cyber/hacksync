@@ -7,8 +7,14 @@ export const Route = createFileRoute("/_authenticated")({
   ssr: false,
   beforeLoad: async ({ location }) => {
     try {
+      const isDemoMode =
+        typeof window !== "undefined" &&
+        (localStorage.getItem("hacksync:demo-mode") === "true" ||
+          location.search.includes("demo=true"));
+
       const { data, error } = await supabase.auth.getUser();
-      if (error || !data.user) {
+
+      if ((error || !data.user) && !isDemoMode) {
         logger.info("Unauthenticated route access attempt, redirecting to /auth", {
           path: location.pathname,
         });
@@ -19,7 +25,7 @@ export const Route = createFileRoute("/_authenticated")({
           },
         });
       }
-      return { user: data.user };
+      return { user: data?.user ?? null };
     } catch (err) {
       if ((err as { isRedirect?: boolean })?.isRedirect) throw err;
       throw redirect({
