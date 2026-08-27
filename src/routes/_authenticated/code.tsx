@@ -55,12 +55,17 @@ import {
   convertScannedFilesToCodeNodes,
   getStoredDirectoryState,
   saveStoredDirectoryState,
+  getStoredMemberFiles,
+  saveStoredMemberFiles,
+  getStoredLocalNodes,
+  saveStoredLocalNodes,
   writeNestedFileByPath,
   getActiveDirectoryHandle,
   setActiveDirectoryHandle,
   exportWorkspaceToZip,
   syncWorkspaceFilesToLocalDisk,
   downloadSingleFile,
+  inferFileArea,
   type LocalDirectoryState,
 } from "@/lib/hacksync/local-filesystem";
 import { logActivity, useRowInsert, useRowMutation, useRowDelete } from "@/lib/hacksync/workspace";
@@ -110,8 +115,10 @@ function CodeBody({ ws }: { ws: Workspace }) {
   const [showGitHubPushModal, setShowGitHubPushModal] = useState(false);
   const [showNewFileModal, setShowNewFileModal] = useState(false);
 
-  // Member local files state
-  const [memberFiles, setMemberFiles] = useState<MemberFile[]>([]);
+  // Member local files state (Initialized from instant localStorage cache)
+  const [memberFiles, setMemberFiles] = useState<MemberFile[]>(() =>
+    getStoredMemberFiles(ws.project.id),
+  );
   const [isLoadingMemberFiles, setIsLoadingMemberFiles] = useState(false);
 
   // Determine current user details
@@ -119,7 +126,7 @@ function CodeBody({ ws }: { ws: Workspace }) {
   const currentRole: Role = callerMember?.role ?? (ws.project.created_by === user?.id ? "owner" : "member");
   const currentUserName = callerMember?.display_name || user?.email?.split("@")[0] || "Developer";
 
-  // Load Member Files from Supabase
+  // Load Member Files from Supabase & merge with local cache
   const loadMemberFiles = useCallback(async () => {
     try {
       setIsLoadingMemberFiles(true);
@@ -127,11 +134,20 @@ function CodeBody({ ws }: { ws: Workspace }) {
         .select("*")
         .eq("project_id", ws.project.id);
 
-      if (!error && data) {
-        setMemberFiles(data as MemberFile[]);
+      if (!error && data && data.length > 0) {
+        setMemberFiles((prev) => {
+          const remoteMap = new Map<string, MemberFile>();
+          for (const f of data as MemberFile[]) remoteMap.set(f.relative_path, f);
+          for (const f of prev) {
+            if (!remoteMap.has(f.relative_path)) remoteMap.set(f.relative_path, f);
+          }
+          const merged = Array.from(remoteMap.values());
+          saveStoredMemberFiles(ws.project.id, merged);
+          return merged;
+        });
       }
     } catch {
-      // Fallback
+      // Keep cached files
     } finally {
       setIsLoadingMemberFiles(false);
     }
@@ -143,7 +159,9 @@ function CodeBody({ ws }: { ws: Workspace }) {
 
   // Local Directory State
   const [localDir, setLocalDir] = useState<LocalDirectoryState>(getStoredDirectoryState);
-  const [localNodes, setLocalNodes] = useState<CodeNode[]>([]);
+  const [localNodes, setLocalNodes] = useState<CodeNode[]>(() =>
+    getStoredLocalNodes(ws.project.id),
+  );
   const [isSyncing, setIsSyncing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
@@ -187,18 +205,96 @@ function CodeBody({ ws }: { ws: Workspace }) {
     setIsEditing(false);
   }, [selected?.id, selected?.content]);
 
+  // Add Member Files (Instant 0ms UI update + persistent localStorage + background Supabase sync)
+  const handleAddMemberFiles = useCallback(
+    async (newFiles: Omit<MemberFile, "id" | "created_at" | "updated_at">[]) => {
+      const defaultRole = currentRole === "owner" ? "lead" : currentRole;
+      const createdMembers: MemberFile[] = newFiles.map((f, idx) => ({
+        ...f,
+        id: `mf-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
+        project_id: ws.project.id,
+        user_id: user?.id ?? null,
+        member_id: callerMember?.id ?? null,
+        owner_role: f.owner_role || defaultRole,
+        sync_status: f.sync_status || "local_modified",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }));
+
+      // 1. INSTANT LOCAL STATE & LOCALSTORAGE PERSISTENCE
+      setMemberFiles((prev) => {
+        const mergedMap = new Map<string, MemberFile>();
+        for (const f of createdMembers) mergedMap.set(f.relative_path, f);
+        for (const f of prev) {
+          if (!mergedMap.has(f.relative_path)) mergedMap.set(f.relative_path, f);
+        }
+        const updated = Array.from(mergedMap.values());
+        saveStoredMemberFiles(ws.project.id, updated);
+        return updated;
+      });
+
+      // 2. Also populate local CodeNodes for unified shared view
+      const createdNodes: CodeNode[] = createdMembers.map((m, idx) => ({
+        id: `local-node-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
+        project_id: ws.project.id,
+        path: m.relative_path,
+        parent_path: m.relative_path.includes("/")
+          ? m.relative_path.substring(0, m.relative_path.lastIndexOf("/"))
+          : null,
+        kind: "file" as const,
+        area: inferFileArea(m.relative_path),
+        owner_role: m.owner_role,
+        status: "done" as const,
+        language: m.language,
+        content: m.content || "",
+        updated_at: m.last_modified,
+      }));
+
+      setLocalNodes((prev) => {
+        const nodeMap = new Map<string, CodeNode>();
+        for (const n of createdNodes) nodeMap.set(n.path, n);
+        for (const n of prev) {
+          if (!nodeMap.has(n.path)) nodeMap.set(n.path, n);
+        }
+        const updated = Array.from(nodeMap.values());
+        saveStoredLocalNodes(ws.project.id, updated);
+        return updated;
+      });
+
+      // 3. Background Database Sync
+      if (user?.id) {
+        try {
+          for (const mf of createdMembers.slice(0, 50)) {
+            await (supabase.from as any)("member_files").insert(mf);
+          }
+        } catch {
+          // Background non-blocking
+        }
+      }
+    },
+    [ws.project.id, user?.id, callerMember?.id, currentRole],
+  );
+
   // Connect local folder (Supports Chrome, Brave, Firefox, Safari, Edge)
   const handleConnectDirectory = useCallback(async () => {
     try {
       setIsSyncing(true);
       const res = await pickDirectoryUniversal();
-      if (!res) {
+      if (!res || res.files.length === 0) {
         setIsSyncing(false);
+        if (res && res.files.length === 0) {
+          setSyncFeedback(`Selected folder "${res.name}" contained no text/code files.`);
+          setTimeout(() => setSyncFeedback(null), 3500);
+        }
         return;
       }
 
-      const nodes = convertScannedFilesToCodeNodes(res.files, ws.project.id);
+      const defaultRole = currentRole === "owner" ? "lead" : currentRole;
+
+      const nodes = convertScannedFilesToCodeNodes(res.files, ws.project.id, defaultRole);
       setLocalNodes(nodes);
+      saveStoredLocalNodes(ws.project.id, nodes);
+
       const state: LocalDirectoryState = {
         connected: true,
         name: res.name,
@@ -222,7 +318,7 @@ function CodeBody({ ws }: { ws: Workspace }) {
               ? "backend"
               : f.area === "database"
                 ? "database"
-                : ("lead" as Role),
+                : defaultRole,
         file_name: f.name,
         relative_path: f.path,
         file_type: "text/plain",
@@ -232,14 +328,9 @@ function CodeBody({ ws }: { ws: Workspace }) {
         last_modified: new Date(f.lastModified).toISOString(),
       }));
 
-      // Insert into member_files table
-      for (const mf of memberStagedFiles.slice(0, 50)) {
-        await (supabase.from as any)("member_files").insert(mf);
-      }
+      await handleAddMemberFiles(memberStagedFiles);
 
-      loadMemberFiles();
-
-      setSyncFeedback(`Synced ${res.files.length} files from ${res.name}!`);
+      setSyncFeedback(`Synced ${res.files.length} files from "${res.name}"!`);
       void logActivity(
         ws.project.id,
         "code",
@@ -253,7 +344,7 @@ function CodeBody({ ws }: { ws: Workspace }) {
     } finally {
       setIsSyncing(false);
     }
-  }, [ws.project.id, user?.id, callerMember?.id, loadMemberFiles]);
+  }, [ws.project.id, user?.id, callerMember?.id, currentRole, handleAddMemberFiles]);
 
   // Push All to Disk
   const handlePushAllToDisk = async () => {
@@ -290,42 +381,16 @@ function CodeBody({ ws }: { ws: Workspace }) {
     }
   };
 
-  // Add Member Files
-  const handleAddMemberFiles = async (
-    newFiles: Omit<MemberFile, "id" | "created_at" | "updated_at">[],
-  ) => {
-    for (const f of newFiles) {
-      const payload = {
-        ...f,
-        project_id: ws.project.id,
-        user_id: user?.id ?? null,
-        member_id: callerMember?.id ?? null,
-      };
-
-      try {
-        const { data } = await (supabase.from as any)("member_files").insert(payload).select("*").single();
-        if (data) {
-          setMemberFiles((prev) => [data as MemberFile, ...prev]);
-        }
-      } catch {
-        // Local in-memory fallback
-        const mock: MemberFile = {
-          ...payload,
-          id: `mf-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        };
-        setMemberFiles((prev) => [mock, ...prev]);
-      }
-    }
-  };
-
   const handleDeleteMemberFile = async (fileId: string) => {
+    setMemberFiles((prev) => {
+      const updated = prev.filter((f) => f.id !== fileId);
+      saveStoredMemberFiles(ws.project.id, updated);
+      return updated;
+    });
     try {
       await (supabase.from as any)("member_files").delete().eq("id", fileId);
-      setMemberFiles((prev) => prev.filter((f) => f.id !== fileId));
     } catch {
-      setMemberFiles((prev) => prev.filter((f) => f.id !== fileId));
+      // Non-blocking
     }
   };
 
@@ -660,9 +725,14 @@ function CodeBody({ ws }: { ws: Workspace }) {
           memberFiles={memberFiles}
           currentUserId={user?.id ?? null}
           currentRole={currentRole}
+          folderName={localDir.connected ? localDir.name : null}
           onAddFiles={handleAddMemberFiles}
           onUpdateFile={(id, updates) => {
-            setMemberFiles((prev) => prev.map((f) => (f.id === id ? { ...f, ...updates } : f)));
+            setMemberFiles((prev) => {
+              const updated = prev.map((f) => (f.id === id ? { ...f, ...updates } : f));
+              saveStoredMemberFiles(ws.project.id, updated);
+              return updated;
+            });
           }}
           onDeleteFile={handleDeleteMemberFile}
           onSelectFile={(f) => {

@@ -1,4 +1,5 @@
-import type { CodeNode, Role, Area } from "./types";
+import type { CodeNode, Role, Area, MemberFile } from "./types";
+import JSZip from "jszip";
 
 export interface ScannedFile {
   path: string;
@@ -33,6 +34,9 @@ const IGNORED_DIRECTORIES = new Set([
   ".gemini",
   "target",
   "vendor",
+  ".idea",
+  ".vscode",
+  "coverage",
 ]);
 
 const IGNORED_FILES = new Set([
@@ -42,6 +46,17 @@ const IGNORED_FILES = new Set([
   "yarn.lock",
   "pnpm-lock.yaml",
   "bun.lockb",
+]);
+
+const BINARY_EXTENSIONS = new Set([
+  "png", "jpg", "jpeg", "gif", "ico", "webp", "bmp", "tiff", "psd",
+  "zip", "tar", "gz", "7z", "rar", "bz2", "xz",
+  "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
+  "exe", "dll", "so", "dylib", "bin", "iso", "dmg", "msi", "app",
+  "class", "jar", "war", "ear", "pyc", "pyo", "pyd", "o", "a",
+  "mp4", "mov", "avi", "mkv", "webm", "mp3", "wav", "flac", "ogg", "m4a",
+  "woff", "woff2", "ttf", "eot", "otf",
+  "sqlite", "db", "sqlite3", "pdb", "wasm",
 ]);
 
 // Memory cache for active directory handle in browser session
@@ -79,6 +94,48 @@ export function clearStoredDirectoryState() {
   localStorage.removeItem(LOCAL_DIR_KEY);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Project-Scoped Local Storage Cache (Guarantees 0 Data Loss & Offline Snapshots)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function getStoredMemberFiles(projectId: string): MemberFile[] {
+  if (typeof window === "undefined" || !projectId) return [];
+  try {
+    const raw = localStorage.getItem(`hacksync:member-files:${projectId}`);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveStoredMemberFiles(projectId: string, files: MemberFile[]) {
+  if (typeof window === "undefined" || !projectId) return;
+  try {
+    localStorage.setItem(`hacksync:member-files:${projectId}`, JSON.stringify(files));
+  } catch (err) {
+    console.warn("Could not cache member files to localStorage", err);
+  }
+}
+
+export function getStoredLocalNodes(projectId: string): CodeNode[] {
+  if (typeof window === "undefined" || !projectId) return [];
+  try {
+    const raw = localStorage.getItem(`hacksync:local-nodes:${projectId}`);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveStoredLocalNodes(projectId: string, nodes: CodeNode[]) {
+  if (typeof window === "undefined" || !projectId) return;
+  try {
+    localStorage.setItem(`hacksync:local-nodes:${projectId}`, JSON.stringify(nodes));
+  } catch (err) {
+    console.warn("Could not cache local nodes to localStorage", err);
+  }
+}
+
 export function getActiveDirectoryHandle(): FileSystemDirectoryHandle | null {
   return activeDirectoryHandle;
 }
@@ -96,13 +153,10 @@ export async function pickLocalDirectory(): Promise<{
   name: string;
 } | null> {
   if (!supportsFileSystemAccess()) {
-    throw new Error(
-      "Native File System Access API is not enabled in this browser. Falling back to universal folder picker.",
-    );
+    throw new Error("Native File System Access API is not enabled in this browser.");
   }
 
   try {
-    // Prompt user to pick a folder on disk
     const handle = await (
       window as unknown as { showDirectoryPicker: () => Promise<FileSystemDirectoryHandle> }
     ).showDirectoryPicker();
@@ -118,14 +172,14 @@ export async function pickLocalDirectory(): Promise<{
     return { handle, name };
   } catch (err) {
     if ((err as Error).name === "AbortError") {
-      return null; // User cancelled the dialog
+      return null;
     }
     throw err;
   }
 }
 
 /**
- * Universal HTML5 Directory Picker: Works in Brave, Firefox, Safari, Edge, Chrome without restrictions.
+ * Universal HTML5 Directory Picker: Works across Brave, Firefox, Safari, Edge, Chrome.
  */
 export async function pickDirectoryViaInput(): Promise<{ name: string; files: ScannedFile[] } | null> {
   return new Promise((resolve) => {
@@ -139,7 +193,12 @@ export async function pickDirectoryViaInput(): Promise<{ name: string; files: Sc
     input.webkitdirectory = true;
     (input as any).directory = true;
     input.multiple = true;
-    input.style.display = "none";
+    input.style.position = "fixed";
+    input.style.top = "-9999px";
+    input.style.left = "-9999px";
+    input.style.opacity = "0";
+    input.style.width = "1px";
+    input.style.height = "1px";
     document.body.appendChild(input);
 
     input.onchange = async () => {
@@ -152,14 +211,14 @@ export async function pickDirectoryViaInput(): Promise<{ name: string; files: Sc
 
         const scanned: ScannedFile[] = [];
         const readPromises: Promise<void>[] = [];
-        let folderName = "Local Project";
+        let folderName = "Local Folder";
 
         for (let i = 0; i < fileList.length; i++) {
           const file = fileList[i];
           if (!file) continue;
 
           const rawPath = file.webkitRelativePath || file.name;
-          const parts = rawPath.split("/");
+          const parts = rawPath.replace(/\\/g, "/").split("/").filter(Boolean);
 
           if (parts.length > 1 && parts[0]) {
             folderName = parts[0];
@@ -174,8 +233,8 @@ export async function pickDirectoryViaInput(): Promise<{ name: string; files: Sc
             continue;
           }
 
-          // Only read text files under 250KB
-          if (file.size > 250_000 || !isLikelyCodeFile(file.name)) {
+          // Only skip binary files and files > 1MB
+          if (file.size > 1_000_000 || !isLikelyCodeFile(file.name)) {
             continue;
           }
 
@@ -196,7 +255,9 @@ export async function pickDirectoryViaInput(): Promise<{ name: string; files: Sc
                   language: inferFileLanguage(ext),
                 });
               })
-              .catch(() => {}),
+              .catch((readErr) => {
+                console.warn(`Could not read file ${file.name}`, readErr);
+              }),
           );
         }
 
@@ -224,7 +285,8 @@ export async function pickDirectoryViaInput(): Promise<{ name: string; files: Sc
 }
 
 /**
- * Universal Folder Picker: Tries native showDirectoryPicker first; if unavailable or blocked by Brave/privacy shields,
+ * Universal Folder Picker: Tries native showDirectoryPicker first;
+ * if unavailable, empty, or blocked by privacy shields (Brave/Firefox),
  * seamlessly opens standard HTML5 directory picker.
  */
 export async function pickDirectoryUniversal(): Promise<{
@@ -232,24 +294,32 @@ export async function pickDirectoryUniversal(): Promise<{
   name: string;
   files: ScannedFile[];
 } | null> {
-  // 1. Try native File System Access API if supported and allowed
+  // 1. Try native File System Access API if supported
   if (supportsFileSystemAccess()) {
     try {
       const picked = await pickLocalDirectory();
       if (picked) {
         const files = await scanLocalDirectory(picked.handle);
-        return { handle: picked.handle, name: picked.name, files };
+        if (files.length > 0) {
+          saveStoredDirectoryState({
+            connected: true,
+            name: picked.name,
+            fileCount: files.length,
+            lastSyncedAt: new Date().toISOString(),
+            autoSync: true,
+          });
+          return { handle: picked.handle, name: picked.name, files };
+        }
       }
-      return null;
     } catch (err) {
       if ((err as Error).name === "AbortError") return null;
-      // Fall through to HTML5 input picker on privacy block or permission error
+      console.warn("Native directory picker fallback:", err);
     }
   }
 
   // 2. HTML5 Directory Input Fallback (Works 100% in Brave, Firefox, Chrome, Safari)
   const inputResult = await pickDirectoryViaInput();
-  if (inputResult) {
+  if (inputResult && inputResult.files.length > 0) {
     saveStoredDirectoryState({
       connected: true,
       name: inputResult.name,
@@ -264,41 +334,95 @@ export async function pickDirectoryUniversal(): Promise<{
     };
   }
 
-  return null;
+  return inputResult ? { handle: null, name: inputResult.name, files: [] } : null;
 }
 
-export async function createProjectSubfolder(
-  parentHandle: FileSystemDirectoryHandle,
-  projectName: string,
-): Promise<FileSystemDirectoryHandle> {
-  const cleanName = projectName
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]/g, "-");
-  return await parentHandle.getDirectoryHandle(cleanName, { create: true });
-}
-
-export async function scaffoldInitialProjectFiles(
-  dirHandle: FileSystemDirectoryHandle,
-  projectName: string,
-  description: string,
-): Promise<void> {
-  try {
-    // 1. README.md
-    const readme = `# ${projectName}\n\n${description || "A synchronized hackathon project built with HackSync."}\n\n## 🚀 Getting Started\n\n\`\`\`bash\nbun install\nbun run dev\n\`\`\`\n\n## 📡 Architecture\n- Managed with HackSync real-time sync.\n`;
-    await writeRawFileToHandle(dirHandle, "README.md", readme);
-
-    // 2. schema.sql
-    const schema = `-- ${projectName} PostgreSQL Schema\nCREATE TABLE IF NOT EXISTS users (\n  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n  email TEXT UNIQUE NOT NULL,\n  created_at TIMESTAMPTZ DEFAULT now()\n);\n`;
-    await writeRawFileToHandle(dirHandle, "schema.sql", schema);
-
-    // 3. src/index.ts
-    const srcDir = await dirHandle.getDirectoryHandle("src", { create: true });
-    const indexTs = `// ${projectName} Main Entrypoint\nexport async function main() {\n  console.log("HackSync Vibe Coding project running!");\n}\nmain();\n`;
-    await writeRawFileToHandle(srcDir, "index.ts", indexTs);
-  } catch (err) {
-    console.warn("Failed to scaffold initial template files:", err);
+/**
+ * Read dropped files and folders via Drag & Drop dataTransfer
+ */
+export async function readDataTransferEntries(
+  dataTransfer: DataTransfer,
+): Promise<{ name: string; files: ScannedFile[] } | null> {
+  const items = dataTransfer.items;
+  if (!items || items.length === 0) {
+    if (dataTransfer.files && dataTransfer.files.length > 0) {
+      const scanned: ScannedFile[] = [];
+      for (let i = 0; i < dataTransfer.files.length; i++) {
+        const file = dataTransfer.files[i];
+        if (!file || !isLikelyCodeFile(file.name)) continue;
+        const text = await file.text().catch(() => "");
+        const ext = file.name.split(".").pop()?.toLowerCase() || "";
+        scanned.push({
+          path: file.name,
+          name: file.name,
+          extension: ext,
+          size: file.size,
+          content: text,
+          lastModified: file.lastModified,
+          area: inferFileArea(file.name),
+          language: inferFileLanguage(ext),
+        });
+      }
+      return { name: "Dropped Files", files: scanned };
+    }
+    return null;
   }
+
+  const scanned: ScannedFile[] = [];
+  let rootName = "Dropped Folder";
+
+  async function traverseEntry(entry: any, currentPath = ""): Promise<void> {
+    if (entry.isFile) {
+      if (IGNORED_FILES.has(entry.name) || entry.name.startsWith(".")) return;
+      if (!isLikelyCodeFile(entry.name)) return;
+
+      try {
+        const file: File = await new Promise((resolve, reject) => entry.file(resolve, reject));
+        if (file.size > 1_000_000) return;
+        const text = await file.text().catch(() => "");
+        const ext = file.name.split(".").pop()?.toLowerCase() || "";
+        const relPath = currentPath ? `${currentPath}/${file.name}` : file.name;
+        scanned.push({
+          path: relPath,
+          name: file.name,
+          extension: ext,
+          size: file.size,
+          content: text,
+          lastModified: file.lastModified,
+          area: inferFileArea(relPath),
+          language: inferFileLanguage(ext),
+        });
+      } catch {
+        // Ignore unreadable
+      }
+    } else if (entry.isDirectory) {
+      if (IGNORED_DIRECTORIES.has(entry.name) || entry.name.startsWith(".")) return;
+      if (!currentPath) rootName = entry.name;
+      try {
+        const dirReader = entry.createReader();
+        const entries: any[] = await new Promise((resolve, reject) => {
+          dirReader.readEntries(resolve, reject);
+        });
+        for (const child of entries) {
+          await traverseEntry(child, currentPath ? `${currentPath}/${entry.name}` : entry.name);
+        }
+      } catch {
+        // Ignore directory read error
+      }
+    }
+  }
+
+  const traversePromises: Promise<void>[] = [];
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const entry = (item as any).webkitGetAsEntry ? (item as any).webkitGetAsEntry() : null;
+    if (entry) {
+      traversePromises.push(traverseEntry(entry, ""));
+    }
+  }
+
+  await Promise.all(traversePromises);
+  return { name: rootName, files: scanned };
 }
 
 export async function writeRawFileToHandle(
@@ -348,7 +472,7 @@ export async function writeNestedFileByPath(
 export async function scanLocalDirectory(
   dirHandle: FileSystemDirectoryHandle,
   prefix = "",
-  maxFiles = 150,
+  maxFiles = 250,
 ): Promise<ScannedFile[]> {
   const results: ScannedFile[] = [];
 
@@ -370,9 +494,8 @@ export async function scanLocalDirectory(
         if (!IGNORED_FILES.has(name) && !name.startsWith(".")) {
           try {
             const fileObj = await (entry as FileSystemFileHandle).getFile();
-            // Only read text files under 250KB to maintain snappy performance
             let content = "";
-            if (fileObj.size < 250_000 && isLikelyCodeFile(name)) {
+            if (fileObj.size < 1_000_000 && isLikelyCodeFile(name)) {
               content = await fileObj.text();
             }
 
@@ -404,36 +527,21 @@ export async function scanLocalDirectory(
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function isLikelyCodeFile(fileName: string): boolean {
-  const ext = fileName.split(".").pop()?.toLowerCase() || "";
-  const codeExts = new Set([
-    "ts",
-    "tsx",
-    "js",
-    "jsx",
-    "py",
-    "sql",
-    "json",
-    "html",
-    "css",
-    "md",
-    "yaml",
-    "yml",
-    "toml",
-    "env",
-    "sh",
-    "rs",
-    "go",
-  ]);
-  return codeExts.has(ext);
+  const clean = fileName.toLowerCase().trim();
+  const ext = clean.split(".").pop() || "";
+  if (BINARY_EXTENSIONS.has(ext)) return false;
+  return true;
 }
 
 export function inferFileLanguage(extension: string): string {
-  switch (extension) {
+  switch (extension.toLowerCase()) {
     case "ts":
     case "tsx":
       return "typescript";
     case "js":
     case "jsx":
+    case "mjs":
+    case "cjs":
       return "javascript";
     case "py":
       return "python";
@@ -442,15 +550,57 @@ export function inferFileLanguage(extension: string): string {
     case "json":
       return "json";
     case "html":
+    case "htm":
       return "html";
     case "css":
+    case "scss":
+    case "sass":
+    case "less":
       return "css";
     case "md":
+    case "mdx":
       return "markdown";
     case "rs":
       return "rust";
     case "go":
       return "go";
+    case "java":
+      return "java";
+    case "c":
+    case "h":
+      return "c";
+    case "cpp":
+    case "hpp":
+    case "cc":
+      return "cpp";
+    case "cs":
+      return "csharp";
+    case "php":
+      return "php";
+    case "rb":
+      return "ruby";
+    case "dart":
+      return "dart";
+    case "kt":
+    case "kts":
+      return "kotlin";
+    case "swift":
+      return "swift";
+    case "sh":
+    case "bash":
+    case "zsh":
+      return "shell";
+    case "yaml":
+    case "yml":
+      return "yaml";
+    case "toml":
+      return "toml";
+    case "xml":
+    case "svg":
+      return "xml";
+    case "graphql":
+    case "gql":
+      return "graphql";
     default:
       return "plaintext";
   }
@@ -459,73 +609,89 @@ export function inferFileLanguage(extension: string): string {
 export function inferFileArea(path: string): "frontend" | "backend" | "database" | "shared" {
   const lower = path.toLowerCase();
   if (
+    lower.includes("frontend") ||
+    lower.includes("components") ||
+    lower.includes("pages") ||
+    lower.includes("views") ||
+    lower.includes("styles") ||
+    lower.includes("css") ||
+    lower.includes("app.") ||
+    lower.includes("index.html") ||
+    lower.endsWith(".tsx") ||
+    lower.endsWith(".jsx") ||
+    lower.endsWith(".vue") ||
+    lower.endsWith(".svelte")
+  ) {
+    return "frontend";
+  }
+  if (
+    lower.includes("backend") ||
+    lower.includes("api") ||
+    lower.includes("routes") ||
+    lower.includes("controllers") ||
+    lower.includes("services") ||
+    lower.includes("server") ||
+    lower.endsWith(".py") ||
+    lower.endsWith(".go") ||
+    lower.endsWith(".rs") ||
+    lower.endsWith(".java") ||
+    lower.endsWith(".cs") ||
+    lower.endsWith(".php")
+  ) {
+    return "backend";
+  }
+  if (
     lower.includes("db") ||
     lower.includes("database") ||
     lower.includes("schema") ||
-    lower.includes("migration") ||
+    lower.includes("migrations") ||
     lower.endsWith(".sql") ||
     lower.includes("prisma") ||
     lower.includes("drizzle")
   ) {
     return "database";
   }
-  if (
-    lower.includes("server") ||
-    lower.includes("/api/") ||
-    lower.startsWith("api/") ||
-    lower.includes("controllers") ||
-    lower.includes("backend") ||
-    lower.includes("services")
-  ) {
-    return "backend";
-  }
-  if (
-    lower.includes("components") ||
-    lower.includes("routes") ||
-    lower.includes("views") ||
-    lower.includes("ui") ||
-    lower.includes("frontend") ||
-    lower.endsWith(".tsx") ||
-    lower.endsWith(".jsx") ||
-    lower.endsWith(".css")
-  ) {
-    return "frontend";
-  }
   return "shared";
 }
 
 export function convertScannedFilesToCodeNodes(
-  files: ScannedFile[],
+  scanned: ScannedFile[],
   projectId: string,
-  defaultRole: Role = "lead",
+  defaultRole: Role = "frontend",
 ): CodeNode[] {
-  return files.map((f, idx) => ({
-    id: `local-node-${idx}-${f.name}`,
-    project_id: projectId,
-    path: f.path,
-    parent_path: f.path.includes("/") ? f.path.substring(0, f.path.lastIndexOf("/")) : null,
-    kind: "file",
-    area: f.area,
-    owner_role:
-      f.area === "frontend"
+  return scanned.map((file, idx) => {
+    const parentPath = file.path.includes("/")
+      ? file.path.substring(0, file.path.lastIndexOf("/"))
+      : null;
+
+    const area = file.area || inferFileArea(file.path);
+    const ownerRole: Role =
+      area === "frontend"
         ? "frontend"
-        : f.area === "backend"
+        : area === "backend"
           ? "backend"
-          : f.area === "database"
+          : area === "database"
             ? "database"
-            : defaultRole,
-    status: "done",
-    language: f.language,
-    content: f.content ?? null,
-    updated_at: new Date(f.lastModified).toISOString(),
-  }));
+            : defaultRole;
+
+    return {
+      id: `local-node-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
+      project_id: projectId,
+      path: file.path,
+      parent_path: parentPath,
+      kind: "file" as const,
+      area,
+      owner_role: ownerRole,
+      status: "done" as const,
+      language: file.language || inferFileLanguage(file.extension),
+      content: file.content || "",
+      updated_at: new Date(file.lastModified).toISOString(),
+    };
+  });
 }
 
-/**
- * Downloads a single file directly to the user's computer.
- */
 export function downloadSingleFile(filePath: string, content: string) {
-  if (typeof window === "undefined") return;
+  if (typeof document === "undefined") return;
   const fileName = filePath.split("/").pop() || "file.txt";
   const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -538,15 +704,14 @@ export function downloadSingleFile(filePath: string, content: string) {
   URL.revokeObjectURL(url);
 }
 
-/**
- * Packs all workspace code nodes into a zip archive and triggers browser download.
- */
-export async function exportWorkspaceToZip(projectName: string, nodes: CodeNode[]): Promise<void> {
+export async function exportWorkspaceToZip(
+  projectName: string,
+  nodes: CodeNode[],
+): Promise<void> {
   if (typeof window === "undefined") return;
-  const JSZip = (await import("jszip")).default;
   const zip = new JSZip();
-
   const fileNodes = nodes.filter((n) => n.kind === "file");
+
   if (fileNodes.length === 0) {
     throw new Error("No files to export in this workspace.");
   }
@@ -557,7 +722,8 @@ export async function exportWorkspaceToZip(projectName: string, nodes: CodeNode[
   }
 
   const blob = await zip.generateAsync({ type: "blob" });
-  const safeName = projectName.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-") || "hacksync-project";
+  const safeName =
+    projectName.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-") || "hacksync-project";
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -568,9 +734,6 @@ export async function exportWorkspaceToZip(projectName: string, nodes: CodeNode[
   URL.revokeObjectURL(url);
 }
 
-/**
- * Writes all workspace code nodes directly to a connected local directory handle on disk.
- */
 export async function syncWorkspaceFilesToLocalDisk(
   dirHandle: FileSystemDirectoryHandle,
   nodes: CodeNode[],
@@ -590,8 +753,7 @@ export async function syncWorkspaceFilesToLocalDisk(
 }
 
 /**
- * Universal Single-File Picker:
- * Picks a local code file from the user's PC using native File System Access or standard HTML5 file picker.
+ * Universal Single-File Picker
  */
 export async function pickLocalFileUniversal(preferredRelativePath?: string): Promise<{
   fileName: string;
@@ -609,24 +771,17 @@ export async function pickLocalFileUniversal(preferredRelativePath?: string): Pr
     try {
       const [handle] = await (window as any).showOpenFilePicker({
         multiple: false,
-        types: [
-          {
-            description: "Code and Text Files",
-            accept: {
-              "text/*": [".ts", ".tsx", ".js", ".jsx", ".py", ".sql", ".json", ".md", ".css", ".html", ".env", ".yaml", ".yml", ".txt", ".rs", ".go", ".java", ".c", ".cpp", ".sh"],
-            },
-          },
-        ],
       });
       if (handle) {
         const file: File = await handle.getFile();
         const content = await file.text();
         const relPath = preferredRelativePath || file.name;
+        const ext = file.name.split(".").pop()?.toLowerCase() || "";
         return {
           fileName: file.name,
           relativePath: relPath.replace(/\\/g, "/").replace(/^\/+/, ""),
           content,
-          language: inferFileLanguage(file.name),
+          language: inferFileLanguage(ext),
           area: inferFileArea(relPath),
           fileType: file.type || "text/plain",
           lastModified: file.lastModified,
@@ -634,15 +789,19 @@ export async function pickLocalFileUniversal(preferredRelativePath?: string): Pr
       }
     } catch (err) {
       if ((err as Error).name === "AbortError") return null;
-      // Fall through to HTML5 input picker
     }
   }
 
-  // 2. HTML5 File Input fallback (Universal across Brave, Firefox, Safari, Edge, Chrome)
+  // 2. HTML5 File Input fallback
   return new Promise((resolve) => {
     const input = document.createElement("input");
     input.type = "file";
-    input.style.display = "none";
+    input.style.position = "fixed";
+    input.style.top = "-9999px";
+    input.style.left = "-9999px";
+    input.style.opacity = "0";
+    input.style.width = "1px";
+    input.style.height = "1px";
     document.body.appendChild(input);
 
     input.onchange = async () => {
@@ -653,22 +812,18 @@ export async function pickLocalFileUniversal(preferredRelativePath?: string): Pr
           return;
         }
 
-        const reader = new FileReader();
-        reader.onload = () => {
-          const content = typeof reader.result === "string" ? reader.result : "";
-          const relPath = preferredRelativePath || file.name;
-          resolve({
-            fileName: file.name,
-            relativePath: relPath.replace(/\\/g, "/").replace(/^\/+/, ""),
-            content,
-            language: inferFileLanguage(file.name),
-            area: inferFileArea(relPath),
-            fileType: file.type || "text/plain",
-            lastModified: file.lastModified,
-          });
-        };
-        reader.onerror = () => resolve(null);
-        reader.readAsText(file);
+        const content = await file.text();
+        const relPath = preferredRelativePath || file.name;
+        const ext = file.name.split(".").pop()?.toLowerCase() || "";
+        resolve({
+          fileName: file.name,
+          relativePath: relPath.replace(/\\/g, "/").replace(/^\/+/, ""),
+          content,
+          language: inferFileLanguage(ext),
+          area: inferFileArea(relPath),
+          fileType: file.type || "text/plain",
+          lastModified: file.lastModified,
+        });
       } catch (err) {
         console.warn("Single file picker error:", err);
         resolve(null);
@@ -689,4 +844,3 @@ export async function pickLocalFileUniversal(preferredRelativePath?: string): Pr
     input.click();
   });
 }
-
