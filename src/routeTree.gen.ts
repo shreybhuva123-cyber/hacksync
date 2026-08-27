@@ -25,6 +25,7 @@ import { Route as AuthenticatedHealthRouteImport } from './routes/_authenticated
 import { Route as AuthenticatedIntegrationsRouteImport } from './routes/_authenticated/integrations'
 import { Route as AuthenticatedPitchRouteImport } from './routes/_authenticated/pitch'
 import { Route as AuthenticatedPredemoRouteImport } from './routes/_authenticated/predemo'
+import { Route as AuthenticatedProjectSettingsRouteImport } from './routes/_authenticated/project-settings'
 import { Route as AuthenticatedProjectsRouteImport } from './routes/_authenticated/projects'
 import { Route as AuthenticatedSchemaRouteImport } from './routes/_authenticated/schema'
 import { Route as AuthenticatedSecurityRouteImport } from './routes/_authenticated/security'
@@ -113,6 +114,12 @@ const AuthenticatedPredemoRoute = AuthenticatedPredemoRouteImport.update({
   path: '/predemo',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedProjectSettingsRoute =
+  AuthenticatedProjectSettingsRouteImport.update({
+    id: '/project-settings',
+    path: '/project-settings',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedProjectsRoute = AuthenticatedProjectsRouteImport.update({
   id: '/projects',
   path: '/projects',
@@ -160,6 +167,7 @@ export interface FileRoutesByFullPath {
   '/integrations': typeof AuthenticatedIntegrationsRoute
   '/pitch': typeof AuthenticatedPitchRoute
   '/predemo': typeof AuthenticatedPredemoRoute
+  '/project-settings': typeof AuthenticatedProjectSettingsRoute
   '/projects': typeof AuthenticatedProjectsRoute
   '/schema': typeof AuthenticatedSchemaRoute
   '/security': typeof AuthenticatedSecurityRoute
@@ -183,6 +191,7 @@ export interface FileRoutesByTo {
   '/integrations': typeof AuthenticatedIntegrationsRoute
   '/pitch': typeof AuthenticatedPitchRoute
   '/predemo': typeof AuthenticatedPredemoRoute
+  '/project-settings': typeof AuthenticatedProjectSettingsRoute
   '/projects': typeof AuthenticatedProjectsRoute
   '/schema': typeof AuthenticatedSchemaRoute
   '/security': typeof AuthenticatedSecurityRoute
@@ -208,6 +217,7 @@ export interface FileRoutesById {
   '/_authenticated/integrations': typeof AuthenticatedIntegrationsRoute
   '/_authenticated/pitch': typeof AuthenticatedPitchRoute
   '/_authenticated/predemo': typeof AuthenticatedPredemoRoute
+  '/_authenticated/project-settings': typeof AuthenticatedProjectSettingsRoute
   '/_authenticated/projects': typeof AuthenticatedProjectsRoute
   '/_authenticated/schema': typeof AuthenticatedSchemaRoute
   '/_authenticated/security': typeof AuthenticatedSecurityRoute
@@ -233,6 +243,7 @@ export interface FileRouteTypes {
     | '/integrations'
     | '/pitch'
     | '/predemo'
+    | '/project-settings'
     | '/projects'
     | '/schema'
     | '/security'
@@ -256,6 +267,7 @@ export interface FileRouteTypes {
     | '/integrations'
     | '/pitch'
     | '/predemo'
+    | '/project-settings'
     | '/projects'
     | '/schema'
     | '/security'
@@ -280,6 +292,7 @@ export interface FileRouteTypes {
     | '/_authenticated/integrations'
     | '/_authenticated/pitch'
     | '/_authenticated/predemo'
+    | '/_authenticated/project-settings'
     | '/_authenticated/projects'
     | '/_authenticated/schema'
     | '/_authenticated/security'
@@ -409,6 +422,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedPredemoRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/project-settings': {
+      id: '/_authenticated/project-settings'
+      path: '/project-settings'
+      fullPath: '/project-settings'
+      preLoaderRoute: typeof AuthenticatedProjectSettingsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/projects': {
       id: '/_authenticated/projects'
       path: '/projects'
@@ -467,6 +487,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedIntegrationsRoute: typeof AuthenticatedIntegrationsRoute
   AuthenticatedPitchRoute: typeof AuthenticatedPitchRoute
   AuthenticatedPredemoRoute: typeof AuthenticatedPredemoRoute
+  AuthenticatedProjectSettingsRoute: typeof AuthenticatedProjectSettingsRoute
   AuthenticatedProjectsRoute: typeof AuthenticatedProjectsRoute
   AuthenticatedSchemaRoute: typeof AuthenticatedSchemaRoute
   AuthenticatedSecurityRoute: typeof AuthenticatedSecurityRoute
@@ -488,6 +509,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedIntegrationsRoute: AuthenticatedIntegrationsRoute,
   AuthenticatedPitchRoute: AuthenticatedPitchRoute,
   AuthenticatedPredemoRoute: AuthenticatedPredemoRoute,
+  AuthenticatedProjectSettingsRoute: AuthenticatedProjectSettingsRoute,
   AuthenticatedProjectsRoute: AuthenticatedProjectsRoute,
   AuthenticatedSchemaRoute: AuthenticatedSchemaRoute,
   AuthenticatedSecurityRoute: AuthenticatedSecurityRoute,

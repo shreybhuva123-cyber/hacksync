@@ -1,4 +1,4 @@
-import type { CodeNode, Role } from "./types";
+import type { CodeNode, Role, Area } from "./types";
 
 export interface ScannedFile {
   path: string;
@@ -587,5 +587,106 @@ export async function syncWorkspaceFilesToLocalDisk(
   }
 
   return { written, failed };
+}
+
+/**
+ * Universal Single-File Picker:
+ * Picks a local code file from the user's PC using native File System Access or standard HTML5 file picker.
+ */
+export async function pickLocalFileUniversal(preferredRelativePath?: string): Promise<{
+  fileName: string;
+  relativePath: string;
+  content: string;
+  language: string;
+  area: Area;
+  fileType: string;
+  lastModified: number;
+} | null> {
+  if (typeof window === "undefined") return null;
+
+  // 1. Try native showOpenFilePicker if supported
+  if (supportsFileSystemAccess() && "showOpenFilePicker" in window) {
+    try {
+      const [handle] = await (window as any).showOpenFilePicker({
+        multiple: false,
+        types: [
+          {
+            description: "Code and Text Files",
+            accept: {
+              "text/*": [".ts", ".tsx", ".js", ".jsx", ".py", ".sql", ".json", ".md", ".css", ".html", ".env", ".yaml", ".yml", ".txt", ".rs", ".go", ".java", ".c", ".cpp", ".sh"],
+            },
+          },
+        ],
+      });
+      if (handle) {
+        const file: File = await handle.getFile();
+        const content = await file.text();
+        const relPath = preferredRelativePath || file.name;
+        return {
+          fileName: file.name,
+          relativePath: relPath.replace(/\\/g, "/").replace(/^\/+/, ""),
+          content,
+          language: inferFileLanguage(file.name),
+          area: inferFileArea(relPath),
+          fileType: file.type || "text/plain",
+          lastModified: file.lastModified,
+        };
+      }
+    } catch (err) {
+      if ((err as Error).name === "AbortError") return null;
+      // Fall through to HTML5 input picker
+    }
+  }
+
+  // 2. HTML5 File Input fallback (Universal across Brave, Firefox, Safari, Edge, Chrome)
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.style.display = "none";
+    document.body.appendChild(input);
+
+    input.onchange = async () => {
+      try {
+        const file = input.files?.[0];
+        if (!file) {
+          resolve(null);
+          return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = () => {
+          const content = typeof reader.result === "string" ? reader.result : "";
+          const relPath = preferredRelativePath || file.name;
+          resolve({
+            fileName: file.name,
+            relativePath: relPath.replace(/\\/g, "/").replace(/^\/+/, ""),
+            content,
+            language: inferFileLanguage(file.name),
+            area: inferFileArea(relPath),
+            fileType: file.type || "text/plain",
+            lastModified: file.lastModified,
+          });
+        };
+        reader.onerror = () => resolve(null);
+        reader.readAsText(file);
+      } catch (err) {
+        console.warn("Single file picker error:", err);
+        resolve(null);
+      } finally {
+        if (document.body.contains(input)) {
+          document.body.removeChild(input);
+        }
+      }
+    };
+
+    input.oncancel = () => {
+      if (document.body.contains(input)) {
+        document.body.removeChild(input);
+      }
+      resolve(null);
+    };
+
+    input.click();
+  });
 }
 

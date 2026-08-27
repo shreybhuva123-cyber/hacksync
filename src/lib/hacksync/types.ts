@@ -224,3 +224,74 @@ export interface UserProject {
   member_count?: number;
 }
 
+export type FileSyncStatus = "synced" | "pending_upload" | "local_modified" | "conflict" | "unlinked";
+
+export interface MemberFile {
+  id: string;
+  project_id: string;
+  user_id: string | null;
+  member_id: string | null;
+  owner_role: Role | null;
+  file_name: string;
+  relative_path: string;
+  file_type: string | null;
+  language: string | null;
+  content: string | null;
+  sync_status: FileSyncStatus;
+  last_modified: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CodeSyncPreviewItem {
+  id: string;
+  path: string;
+  fileName: string;
+  area: Area;
+  ownerRole: Role;
+  ownerName: string;
+  ownerUserId: string | null;
+  changeType: "added" | "modified" | "unchanged" | "deleted";
+  content: string | null;
+  previousContent: string | null;
+  language: string;
+  isConflict: boolean;
+  conflictDetails?: {
+    otherOwnerName: string;
+    otherOwnerRole: Role;
+    otherContent: string;
+  };
+}
+
+export interface CodeSyncConflict {
+  path: string;
+  fileA: MemberFile;
+  fileB: MemberFile;
+  resolution?: "keep_a" | "keep_b" | "manual";
+  mergedContent?: string;
+}
+
+export interface SyncSession {
+  id: string;
+  project_id: string;
+  synced_by: string | null;
+  actor_name: string;
+  actor_role: string;
+  files_count: number;
+  conflicts_resolved: number;
+  summary: Record<string, any>;
+  created_at: string;
+}
+
+export interface GitHubPushRecord {
+  id: string;
+  project_id: string;
+  repo_url: string;
+  branch: string;
+  commit_sha: string;
+  commit_message: string;
+  files_count: number;
+  author_name: string | null;
+  created_at: string;
+}
+
