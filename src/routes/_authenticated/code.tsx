@@ -180,7 +180,7 @@ function CodeBody({ ws }: { ws: Workspace }) {
                     : f.area === "database"
                       ? "database"
                       : "lead",
-              status: "implemented",
+              status: "done",
               language: f.language,
               content: f.content || null,
             },
@@ -375,7 +375,7 @@ function CodeBody({ ws }: { ws: Workspace }) {
           kind: "file" as const,
           area: "shared" as const,
           owner_role: "lead" as const,
-          status: "implemented" as const,
+          status: "done" as const,
           language: "markdown",
           content: `# ${ws.project.name}\n\n${ws.project.description || "Hackathon project workspace managed by HackSync."}\n\n## 🚀 Getting Started\n\n1. Install dependencies: \`npm install\`\n2. Run development server: \`npm run dev\`\n3. Single Source of Truth API contracts are synchronized via HackSync.\n`,
         },
@@ -406,12 +406,23 @@ function CodeBody({ ws }: { ws: Workspace }) {
   // Create new file
   const handleCreateNewFile = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newFilePath.trim()) {
-      setNewFileError("File path is required.");
+    setNewFileError(null);
+
+    let cleanPath = newFilePath.trim().replace(/\\/g, "/");
+    // Strip Windows drive letter (e.g. "D:/shrey/hacksync coding/src/index.ts" -> "src/index.ts")
+    cleanPath = cleanPath.replace(/^[A-Za-z]:\/?/, "");
+    cleanPath = cleanPath.replace(/^\/+/, "");
+
+    if (!cleanPath) {
+      setNewFileError("Please enter a relative file path (e.g. src/index.ts or README.md).");
       return;
     }
 
-    const cleanPath = newFilePath.trim().replace(/^\//, "");
+    // If user entered only a bare name without extension, add .ts
+    if (!cleanPath.includes(".")) {
+      cleanPath = `${cleanPath}.ts`;
+    }
+
     const parts = cleanPath.split("/");
     const parentPath = parts.length > 1 ? parts.slice(0, -1).join("/") : null;
     const ext = cleanPath.split(".").pop()?.toLowerCase() ?? "";
@@ -429,6 +440,11 @@ function CodeBody({ ws }: { ws: Workspace }) {
       html: "html",
     };
 
+    const validOwnerRole: "frontend" | "backend" | "database" | "lead" =
+      newFileRole === "frontend" || newFileRole === "backend" || newFileRole === "database"
+        ? newFileRole
+        : "lead";
+
     const initialContent = newFileContent || `// ${cleanPath}\n`;
 
     insert.mutate(
@@ -439,8 +455,8 @@ function CodeBody({ ws }: { ws: Workspace }) {
           path: cleanPath,
           parent_path: parentPath,
           kind: "file",
-          area: newFileRole === "lead" ? "shared" : newFileRole,
-          owner_role: newFileRole,
+          area: validOwnerRole === "lead" ? "shared" : validOwnerRole,
+          owner_role: validOwnerRole,
           status: "in_progress",
           language: langMap[ext] || "text",
           content: initialContent,
@@ -983,7 +999,7 @@ function CodeBody({ ws }: { ws: Workspace }) {
             )}
 
             <form onSubmit={handleCreateNewFile} className="space-y-4">
-              <div className="space-y-1">
+              <div className="space-y-1.5">
                 <label className="block text-xs font-semibold text-foreground">
                   File Path <span className="text-destructive">*</span>
                 </label>
@@ -992,17 +1008,33 @@ function CodeBody({ ws }: { ws: Workspace }) {
                   required
                   value={newFilePath}
                   onChange={(e) => setNewFilePath(e.target.value)}
-                  placeholder="e.g. src/services/auth.ts or README.md"
-                  className="mono w-full rounded-lg border border-input bg-background px-3 py-2 text-xs outline-none focus:border-primary"
+                  placeholder="e.g. src/index.ts, routes/api.ts, db/schema.sql, README.md"
+                  className="mono w-full rounded-lg border border-input bg-background px-3 py-2 text-xs outline-none focus:border-primary text-foreground"
                 />
+                <p className="text-[11px] text-muted-foreground">
+                  Enter a relative project file path (e.g. <code className="text-primary font-mono">src/index.ts</code>, <code className="text-primary font-mono">app.py</code>, <code className="text-primary font-mono">README.md</code>).
+                </p>
+                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                  <span className="text-[10px] text-muted-foreground font-medium">Quick Templates:</span>
+                  {["src/index.ts", "src/routes/api.ts", "src/db/schema.sql", "README.md"].map((tmpl) => (
+                    <button
+                      key={tmpl}
+                      type="button"
+                      onClick={() => setNewFilePath(tmpl)}
+                      className="rounded bg-secondary border border-border px-2 py-0.5 text-[10px] mono text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                    >
+                      {tmpl}
+                    </button>
+                  ))}
+                </div>
               </div>
 
-              <div className="space-y-1">
+              <div className="space-y-1.5">
                 <label className="block text-xs font-semibold text-foreground">
                   Owning Role
                 </label>
                 <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
-                  {ROLES.map((r) => (
+                  {(["frontend", "backend", "database", "lead"] as Role[]).map((r) => (
                     <button
                       key={r}
                       type="button"

@@ -269,7 +269,7 @@ function SettingsBody({ ws }: { ws: Workspace }) {
                     : f.area === "database"
                       ? "database"
                       : "lead",
-              status: "implemented",
+              status: "done",
               language: f.language,
               content: f.content || null,
             },
