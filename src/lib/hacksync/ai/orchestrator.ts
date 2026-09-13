@@ -1,6 +1,8 @@
 import type { Workspace, CodeNode, MemberFile } from "../types";
 import { ProjectKnowledgeGraph } from "../intelligence/knowledge-graph";
-import { TenantGuard } from "../security/tenant-guard";
+import { ProjectIndexManager } from "../intelligence/project-index-manager";
+import { TenantGuard, type AISecurityContext } from "../security/tenant-guard";
+import { AuthenticationError } from "@/lib/errors";
 import { AuditTrail } from "../security/audit-trail";
 import { AIObservability } from "./observability";
 import { AIToolExecutor } from "./tools";
@@ -20,10 +22,8 @@ export interface OrchestrationResult {
 }
 
 export class AIOrchestrator {
-  private static knowledgeGraph = new ProjectKnowledgeGraph();
-
-  static getKnowledgeGraph(): ProjectKnowledgeGraph {
-    return this.knowledgeGraph;
+  static getKnowledgeGraph(projectId = "default-project"): ProjectKnowledgeGraph {
+    return ProjectIndexManager.getGraph(projectId);
   }
 
   /**
@@ -89,19 +89,42 @@ export class AIOrchestrator {
     activeNode?: CodeNode | null | undefined;
     memberFiles?: MemberFile[] | undefined;
     userId?: string | undefined;
+    securityContext?: AISecurityContext | undefined;
     modelPreference?: string | undefined;
     chatHistory?: { role: string; content: string }[] | undefined;
   }): Promise<OrchestrationResult> {
     const startTime = Date.now();
-    const requestId = AIObservability.generateRequestId();
-    const userId = params.userId || "client-user";
-    const projectId = params.ws?.project.id || "default-project";
+    const requestId = params.securityContext?.requestId || AIObservability.generateRequestId();
+
+    // 1. Resolve security context and enforce tenant boundary
+    let tenantContext: AISecurityContext;
+    if (params.securityContext) {
+      tenantContext = params.securityContext;
+    } else if (params.ws) {
+      const resolvedUserId = params.userId || params.ws.members?.[0]?.user_id || params.ws.project.created_by;
+      if (!resolvedUserId) {
+        throw new AuthenticationError("[AIOrchestrator] Authentication required. No securityContext or authenticated userId provided.");
+      }
+      tenantContext = TenantGuard.extractContext(params.ws, resolvedUserId, requestId);
+    } else {
+      const resolvedUserId = params.userId;
+      if (!resolvedUserId) {
+        throw new AuthenticationError("[AIOrchestrator] Authentication required. No securityContext or authenticated userId provided.");
+      }
+      tenantContext = {
+        userId: resolvedUserId,
+        projectId: "default-project",
+        role: "lead",
+        requestId,
+      };
+    }
+
+    const userId = tenantContext.userId;
+    const projectId = tenantContext.projectId;
     const preference = params.modelPreference || "builtin";
 
-    // 1. Multi-tenant context extraction
-    const tenantContext = params.ws
-      ? TenantGuard.extractContext(params.ws, userId)
-      : { userId, projectId, role: "lead" as const };
+    // Validate project boundary
+    TenantGuard.validateProjectAccess(tenantContext, projectId, "AI Query Orchestration");
 
     // 2. Resolve multi-turn context (e.g. "fix it", "now test it")
     const { resolvedQuery, activeBugId, activeFilePath } =
@@ -110,14 +133,16 @@ export class AIOrchestrator {
     // 3. Classify intent
     const intent = this.detectIntent(resolvedQuery);
 
-    // 4. Ensure Project Knowledge Graph is indexed
+    // 4. Ensure Project Knowledge Graph is isolated and indexed for THIS project
+    const knowledgeGraph = ProjectIndexManager.getGraph(projectId);
     if (params.ws) {
-      this.knowledgeGraph.indexWorkspace(params.ws, params.memberFiles || []);
+      knowledgeGraph.indexWorkspace(params.ws, params.memberFiles || []);
     } else if (params.activeNode && params.activeNode.content) {
-      this.knowledgeGraph.indexFile(params.activeNode.path, params.activeNode.content);
+      TenantGuard.sanitizeFilePath(params.activeNode.path);
+      knowledgeGraph.indexFile(params.activeNode.path, params.activeNode.content);
     }
 
-    const toolExecutor = new AIToolExecutor(this.knowledgeGraph, tenantContext, requestId);
+    const toolExecutor = new AIToolExecutor(knowledgeGraph, tenantContext, requestId);
     const executedTools: { name: string; success: boolean; summary: string }[] = [];
     const collectedFindings: AIFinding[] = [];
 
@@ -173,7 +198,7 @@ export class AIOrchestrator {
     } else if (intent === "architecture") {
       if (resolvedQuery.toLowerCase().includes("responsible for") || resolvedQuery.toLowerCase().includes("attendance")) {
         const concept = resolvedQuery.replace(/.*responsible for\s+/i, "").replace(/[?.!]+$/, "").trim();
-        const files = this.knowledgeGraph.getFilesResponsibleFor(concept || "auth");
+        const files = knowledgeGraph.getFilesResponsibleFor(concept || "auth");
         executedTools.push({
           name: "find_references",
           success: true,

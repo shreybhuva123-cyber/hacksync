@@ -131,6 +131,10 @@ export class ProjectKnowledgeGraph {
     return this.symbolTable.get(name) || [];
   }
 
+  searchSymbols(name: string): ParsedSymbol[] {
+    return this.findSymbol(name);
+  }
+
   findDependencies(path: string): string[] {
     return Array.from(this.dependencyGraph.get(path) || []);
   }

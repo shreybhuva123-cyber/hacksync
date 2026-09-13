@@ -1,6 +1,5 @@
 import { BENCHMARK_DATASET, type BenchmarkCase } from "./benchmark-dataset";
 import { EvaluationScorer, type EvaluationMetrics, type CaseEvaluationResult } from "./scoring";
-import { AIOrchestrator } from "../ai/orchestrator";
 import type { Workspace } from "../types";
 
 export interface EvaluationReport {
@@ -15,6 +14,7 @@ export class AIEvaluator {
    * Executes the full benchmark evaluation suite.
    */
   static async runBenchmark(ws?: Workspace | null): Promise<EvaluationReport> {
+    const { AIOrchestrator } = await import("../ai/orchestrator");
     const caseResults: CaseEvaluationResult[] = [];
 
     for (const testCase of BENCHMARK_DATASET) {

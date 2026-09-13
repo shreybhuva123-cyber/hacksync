@@ -1,46 +1,128 @@
 import type { ProjectKnowledgeGraph } from "../intelligence/knowledge-graph";
-import { TenantGuard, type TenantContext } from "../security/tenant-guard";
+import { TenantGuard, type AISecurityContext } from "../security/tenant-guard";
 import { SecretRedactor } from "../security/secret-redactor";
 import { DependencyScanner } from "../intelligence/dependency-scanner";
 import { EvidenceEngine } from "./evidence-engine";
 import { ApprovalGate } from "./approval-gate";
+import { AuditTrail } from "../security/audit-trail";
 import type { ToolCallResult, AIFinding } from "./types";
+import { AuthorizationError } from "@/lib/errors";
+
+// ─── TOOL PERMISSION TIERS ───────────────────────────────────────────────────
+
+export type ToolPermissionTier = "READ" | "WRITE" | "EXECUTE";
+
+export const TOOL_PERMISSIONS: Record<string, ToolPermissionTier> = {
+  // READ tools (allowed for authorized project members)
+  search_project: "READ",
+  read_file: "READ",
+  get_file: "READ",
+  search_symbols: "READ",
+  find_references: "READ",
+  analyze_code: "READ",
+  analyze_security: "READ",
+  analyze_dependencies: "READ",
+  get_project_structure: "READ",
+  git_status: "READ",
+  git_diff: "READ",
+  generate_fix_prompt: "READ",
+
+  // WRITE tools (require explicit user approval)
+  modify_file: "WRITE",
+  apply_patch: "WRITE",
+  create_file: "WRITE",
+  delete_file: "WRITE",
+  generate_fix: "WRITE",
+
+  // EXECUTE tools (require approval + sandbox; safely disabled on host in Phase 0)
+  execute_command: "EXECUTE",
+  run_tests: "EXECUTE",
+  run_migration: "EXECUTE",
+};
+
+/**
+ * Centralized tool authorization and argument validation boundary.
+ * Never trusts LLM-supplied arguments; validates path confinement and project boundaries.
+ */
+export function authorizeToolExecution(params: {
+  securityContext: AISecurityContext;
+  toolName: string;
+  arguments: Record<string, any>;
+}): { authorized: boolean; tier: ToolPermissionTier; sanitizedArgs: Record<string, any> } {
+  const { securityContext, toolName, arguments: args } = params;
+
+  // 1. Verify project tenant access
+  TenantGuard.validateProjectAccess(securityContext, securityContext.projectId, toolName);
+
+  // 2. Reject LLM attempts to specify a foreign projectId
+  if (args["projectId"] && String(args["projectId"]).trim() !== securityContext.projectId) {
+    throw new AuthorizationError(
+      `[Security] Cross-project parameter escape prevented. Target '${args["projectId"]}' does not match bound project '${securityContext.projectId}'.`,
+    );
+  }
+
+  // 3. Determine permission tier
+  const tier = TOOL_PERMISSIONS[toolName] || "WRITE";
+
+  // 4. Sanitize and validate file paths
+  const sanitizedArgs = { ...args };
+  const pathKey = ["path", "filePath", "targetFile", "file"].find((k) => typeof sanitizedArgs[k] === "string");
+  if (pathKey && sanitizedArgs[pathKey]) {
+    sanitizedArgs[pathKey] = TenantGuard.sanitizeFilePath(String(sanitizedArgs[pathKey]));
+  }
+
+  // 5. EXECUTE tier policy: host execution is strictly disabled in Phase 0
+  if (tier === "EXECUTE") {
+    if (toolName === "execute_command") {
+      throw new AuthorizationError(
+        `[Security] Host command execution ('${toolName}') is strictly disabled in Phase 0. Isolated container sandboxing will be available in Phase 1.`,
+      );
+    }
+  }
+
+  return { authorized: true, tier, sanitizedArgs };
+}
 
 export class AIToolExecutor {
   constructor(
     private graph: ProjectKnowledgeGraph,
-    private context: TenantContext,
+    private context: AISecurityContext,
     private requestId: string,
   ) {}
 
-  async execute(toolName: string, args: Record<string, any>): Promise<ToolCallResult> {
+  async execute(toolName: string, rawArgs: Record<string, any>): Promise<ToolCallResult> {
     const startTime = Date.now();
 
-    // Check Multi-tenant authorization
-    TenantGuard.validateProjectAccess(this.context, this.context.projectId, toolName);
-
     try {
+      // 1. Centralized Authorization Boundary
+      const { tier, sanitizedArgs: args } = authorizeToolExecution({
+        securityContext: this.context,
+        toolName,
+        arguments: rawArgs,
+      });
+
       let data: any = null;
-      let requiresApproval = false;
+      let requiresApproval = tier === "WRITE" || tier === "EXECUTE";
       let approvalId: string | undefined;
 
       switch (toolName) {
         case "search_project": {
           const query = String(args["query"] || "");
-          const limit = Number(args["limit"] || 5);
+          const limit = Math.min(20, Math.max(1, Number(args["limit"] || 5)));
           data = this.graph.search(query, limit);
           break;
         }
 
+        case "get_file":
         case "read_file": {
-          const rawPath = String(args["path"] || "");
-          const safePath = TenantGuard.sanitizeFilePath(rawPath);
+          const safePath = String(args["path"] || args["filePath"] || "");
           const rawContent = this.graph.getFileContent(safePath);
 
           if (rawContent === undefined) {
             throw new Error(`File '${safePath}' not found in project index.`);
           }
 
+          // Secret Redaction prior to returning data to context
           const { redactedText } = SecretRedactor.redact(rawContent);
           const lines = redactedText.split("\n");
 
@@ -69,13 +151,13 @@ export class AIToolExecutor {
           data = {
             target: symbolOrPath,
             dependents,
-            message: `Found ${dependents.length} file(s) that import or depend on '${symbolOrPath}'`,
+            message: `Found ${dependents.length} file(s) that depend on '${symbolOrPath}'`,
           };
           break;
         }
 
         case "analyze_code": {
-          const path = args["path"] ? TenantGuard.sanitizeFilePath(String(args["path"])) : undefined;
+          const path = args["path"] ? String(args["path"]) : undefined;
           const findings = EvidenceEngine.collectFindings(this.graph, path);
           data = {
             totalFindings: findings.length,
@@ -91,7 +173,8 @@ export class AIToolExecutor {
               f.title.toLowerCase().includes("sql") ||
               f.title.toLowerCase().includes("auth") ||
               f.title.toLowerCase().includes("password") ||
-              f.severity === "CRITICAL",
+              f.severity === "CRITICAL" ||
+              f.severity === "HIGH",
           );
 
           data = {
@@ -178,34 +261,28 @@ CONSTRAINTS:
 - Do not remove authentication middleware.
 - Do not hardcode credentials.
 
-ACCEPTANCE TESTS:
-- Valid request succeeds with expected payload.
-- Null or invalid entity returns 401/404 safely without throwing 500.
-- Existing regression tests continue passing.
-
 OUTPUT:
 Return:
 1. Explanation of fix
 2. Unified Git patch
-3. Unit test case
-4. Remaining risks`;
+3. Unit test case`;
 
           data = { prompt };
           break;
         }
 
+        case "modify_file":
         case "apply_patch": {
-          // Mutating tool! Requires Approval Gate
           requiresApproval = true;
           const patchSummary = String(args["summary"] || "Apply code patch");
-          const targetFile = String(args["targetFile"] || "unknown");
-          const patchDiff = String(args["patch"] || "");
+          const targetFile = String(args["targetFile"] || args["path"] || "unknown");
+          const patchDiff = String(args["patch"] || args["diff"] || "");
 
           const approvalReq = ApprovalGate.createApprovalRequest({
             requestId: this.requestId,
             projectId: this.context.projectId,
             userId: this.context.userId,
-            toolName: "apply_patch",
+            toolName,
             summary: patchSummary,
             rationale: "Fix identified code defect via verified patch.",
             filesAffected: [targetFile],
@@ -216,7 +293,7 @@ Return:
           data = {
             status: "PENDING_APPROVAL",
             approvalId,
-            message: "This is a mutating action requiring explicit user approval.",
+            message: "This mutating operation requires explicit user approval before execution.",
             approvalRequest: approvalReq,
           };
           break;
@@ -226,6 +303,18 @@ Return:
           throw new Error(`Unknown AI tool: '${toolName}'`);
       }
 
+      // Record Audit Event
+      AuditTrail.record({
+        requestId: this.requestId,
+        userId: this.context.userId,
+        projectId: this.context.projectId,
+        toolName,
+        actionType: tier === "READ" ? "READ_ONLY" : "MUTATING",
+        status: "success",
+        targetFiles: args["path"] ? [String(args["path"])] : undefined,
+        executionMs: Date.now() - startTime,
+      });
+
       return {
         toolName,
         success: true,
@@ -234,12 +323,26 @@ Return:
         requiresApproval,
         approvalId,
       };
-    } catch (err) {
+    } catch (err: any) {
+      const errorMessage = err?.message || String(err);
+
+      // Record Denied / Failed Audit Event
+      AuditTrail.record({
+        requestId: this.requestId,
+        userId: this.context.userId,
+        projectId: this.context.projectId,
+        toolName,
+        actionType: "READ_ONLY",
+        status: err instanceof AuthorizationError ? "denied" : "failed",
+        details: SecretRedactor.redact(errorMessage).redactedText,
+        executionMs: Date.now() - startTime,
+      });
+
       return {
         toolName,
         success: false,
         data: null,
-        error: (err as Error).message,
+        error: SecretRedactor.redact(errorMessage).redactedText,
         executionMs: Date.now() - startTime,
       };
     }

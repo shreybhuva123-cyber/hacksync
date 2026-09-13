@@ -30,7 +30,7 @@ import { cn } from "@/lib/utils";
 import { ApprovalGate } from "@/lib/hacksync/ai/approval-gate";
 import { ProjectHealthCalculator } from "@/lib/hacksync/security/health-score";
 import { AIEvaluator } from "@/lib/hacksync/evaluation/evaluator";
-import { AIOrchestrator } from "@/lib/hacksync/ai/orchestrator";
+import { ProjectKnowledgeGraph } from "@/lib/hacksync/intelligence/knowledge-graph";
 
 const PRESET_PROMPTS = [
   {
@@ -80,18 +80,14 @@ export function AiCopilotModal({
   const [showSettings, setShowSettings] = useState(false);
   const [tempProvider, setTempProvider] = useState<LLMProviderType>("builtin");
   const [tempModel, setTempModel] = useState<string>("gemini-2.0-flash");
-  const [customGeminiKey, setCustomGeminiKey] = useState<string>(() => {
+
+  // Proactively purge legacy keys from browser storage to ensure security compliance
+  useEffect(() => {
     if (typeof window !== "undefined") {
-      return localStorage.getItem("hacksync_gemini_key") || "";
+      localStorage.removeItem("hacksync_gemini_key");
+      localStorage.removeItem("hacksync_openai_key");
     }
-    return "";
-  });
-  const [customOpenaiKey, setCustomOpenaiKey] = useState<string>(() => {
-    if (typeof window !== "undefined") {
-      return localStorage.getItem("hacksync_openai_key") || "";
-    }
-    return "";
-  });
+  }, []);
 
   const [messages, setMessages] = useState<CopilotMessage[]>([
     {
@@ -130,11 +126,14 @@ I have direct access to your repository structure, database schema, and live int
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isThinking]);
 
-  if (!isOpen) return null;
-
   const handleResolveApproval = (approvalId: string, decision: "approved" | "rejected") => {
     try {
-      ApprovalGate.resolveApproval(approvalId, decision);
+      ApprovalGate.resolveApproval({
+        approvalId,
+        decision,
+        userId: ws?.members?.[0]?.user_id || ws?.project?.created_by || "usr-lead-1",
+        projectId: ws?.project?.id || "default-project",
+      });
       setMessages((prev) =>
         prev.map((msg) => {
           if (msg.pendingApproval?.id === approvalId) {
@@ -242,7 +241,7 @@ REQUIREMENTS:
       }
 
       if (text.toLowerCase().includes("health score")) {
-        const health = ProjectHealthCalculator.calculate(AIOrchestrator.getKnowledgeGraph(), ws ?? null);
+        const health = ProjectHealthCalculator.calculate(new ProjectKnowledgeGraph(), ws ?? null);
         const healthMarkdown = `### 🏥 HackSync Project Health Score: ${health.overallScore}/100 (Grade: ${health.letterGrade})
 
 | Factor | Weight | Score | Evaluation Target |
@@ -311,18 +310,6 @@ REQUIREMENTS:
       model: tempModel,
       temperature: 0.7,
     });
-    if (typeof window !== "undefined") {
-      if (customGeminiKey.trim()) {
-        localStorage.setItem("hacksync_gemini_key", customGeminiKey.trim());
-      } else {
-        localStorage.removeItem("hacksync_gemini_key");
-      }
-      if (customOpenaiKey.trim()) {
-        localStorage.setItem("hacksync_openai_key", customOpenaiKey.trim());
-      } else {
-        localStorage.removeItem("hacksync_openai_key");
-      }
-    }
     setShowSettings(false);
   };
 
@@ -336,6 +323,8 @@ REQUIREMENTS:
       },
     ]);
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-3 sm:p-4 backdrop-blur-sm">
@@ -478,57 +467,14 @@ REQUIREMENTS:
               </button>
             </div>
 
-            {tempProvider === "gemini" && (
-              <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 space-y-1.5 animate-in fade-in">
-                <label className="text-[11px] font-semibold text-foreground flex items-center justify-between">
-                  <span>Custom Google Gemini API Key (Optional)</span>
-                  <a
-                    href="https://aistudio.google.com/app/apikey"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-primary hover:underline text-[10px]"
-                  >
-                    Get API Key ↗
-                  </a>
-                </label>
-                <input
-                  type="password"
-                  value={customGeminiKey}
-                  onChange={(e) => setCustomGeminiKey(e.target.value)}
-                  placeholder="AIzaSy..."
-                  className="w-full rounded border border-input bg-background px-2.5 py-1.5 text-xs outline-none focus:border-primary"
-                />
-                <p className="text-[10px] text-muted-foreground">
-                  Saved securely in your browser's local storage. If omitted, falls back to the server gateway or built-in engine.
-                </p>
+            <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 space-y-1 text-xs text-muted-foreground animate-in fade-in">
+              <div className="font-semibold text-foreground flex items-center gap-1.5 text-xs">
+                <span className="text-primary">🛡️</span> Server-Managed AI Gateway
               </div>
-            )}
-
-            {tempProvider === "openai" && (
-              <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 space-y-1.5 animate-in fade-in">
-                <label className="text-[11px] font-semibold text-foreground flex items-center justify-between">
-                  <span>Custom OpenAI API Key (Optional)</span>
-                  <a
-                    href="https://platform.openai.com/api-keys"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-primary hover:underline text-[10px]"
-                  >
-                    Get API Key ↗
-                  </a>
-                </label>
-                <input
-                  type="password"
-                  value={customOpenaiKey}
-                  onChange={(e) => setCustomOpenaiKey(e.target.value)}
-                  placeholder="sk-proj-..."
-                  className="w-full rounded border border-input bg-background px-2.5 py-1.5 text-xs outline-none focus:border-primary"
-                />
-                <p className="text-[10px] text-muted-foreground">
-                  Saved securely in your browser's local storage.
-                </p>
-              </div>
-            )}
+              <p className="text-[11px] leading-relaxed">
+                Model credentials and API keys are securely managed on the backend server. No API keys are accepted or stored in browser storage.
+              </p>
+            </div>
 
             <div className="flex justify-end gap-2 pt-1">
               <button

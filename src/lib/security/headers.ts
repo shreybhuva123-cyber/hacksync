@@ -24,7 +24,7 @@ export function getProductionSecurityHeaders(config?: SecurityHeadersConfig): Re
 
   const cspDirectives = [
     "default-src 'self'",
-    `connect-src 'self' https://${supabaseHost} wss://${supabaseHost} https://api.openai.com https://api.anthropic.com https://generativelanguage.googleapis.com`,
+    `connect-src 'self' https://${supabaseHost} wss://${supabaseHost}`,
     scriptDirectives,
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com data:",

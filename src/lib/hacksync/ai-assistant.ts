@@ -291,7 +291,7 @@ export function analyzeCodeFile(node: CodeNode, ws: Workspace): CodeAnalysisResu
 
 import { aiAssistantLimiter } from "@/lib/security/rate-limiter";
 import { metrics } from "@/lib/observability/metrics";
-import { AIOrchestrator } from "./ai/orchestrator";
+import { supabase } from "@/integrations/supabase/client";
 import { ApprovalGate } from "./ai/approval-gate";
 
 export async function askWorkspaceCopilot(
@@ -299,11 +299,33 @@ export async function askWorkspaceCopilot(
   ws?: Workspace | null,
   activeNode?: CodeNode | null,
   chatHistory: CopilotMessage[] = [],
-  userId = "client-user",
+  userId?: string | undefined,
   modelPreference = "builtin",
 ): Promise<CopilotMessage> {
+  let authToken: string | undefined;
+  let authenticatedUserId = userId && userId !== "client-user" ? userId : undefined;
+
+  // Retrieve current authenticated session token from Supabase
+  try {
+    const { data } = await supabase.auth.getSession();
+    if (data?.session?.access_token) {
+      authToken = data.session.access_token;
+      if (data.session.user?.id) {
+        authenticatedUserId = data.session.user.id;
+      }
+    }
+  } catch {
+    // Offline or test environment
+  }
+
+  const effectiveUserId =
+    authenticatedUserId ||
+    ws?.members?.[0]?.user_id ||
+    ws?.project?.created_by ||
+    "usr-authenticated";
+
   // Enforce distributed rate limit
-  const rateCheck = await aiAssistantLimiter.check(userId);
+  const rateCheck = await aiAssistantLimiter.check(effectiveUserId);
   if (!rateCheck.allowed) {
     metrics.incrementCounter("rate_limit_exceeded");
     return {
@@ -314,16 +336,68 @@ export async function askWorkspaceCopilot(
     };
   }
 
+  // If in browser and workspace is available, dispatch query to backend AI gateway
+  if (typeof window !== "undefined" && ws?.project?.id && typeof fetch === "function") {
+    try {
+      const response = await fetch("/api/ai/query", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : { Authorization: `Bearer ${effectiveUserId}` }),
+        },
+        body: JSON.stringify({
+          query: userQuery,
+          projectId: ws.project.id,
+          workspace: ws,
+          activeNode,
+          modelPreference,
+          chatHistory: chatHistory.map((m) => ({ role: m.role, content: m.content })),
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const pendingApprovals = ApprovalGate.getPendingForProject(ws.project.id);
+        const latestPending = pendingApprovals.length > 0 ? pendingApprovals[pendingApprovals.length - 1] : undefined;
+
+        return {
+          id: `copilot-${Date.now()}`,
+          role: "assistant",
+          timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          content: data.text,
+          suggestedActions: data.suggestedActions,
+          intent: data.intent,
+          toolCalls: data.toolCalls,
+          findings: data.findings,
+          requestId: data.requestId,
+          modelUsed: data.modelUsed,
+          pendingApproval: latestPending,
+        };
+      } else if (response.status >= 400 && response.status < 500) {
+        const errData = await response.json().catch(() => ({}));
+        return {
+          id: `copilot-err-${Date.now()}`,
+          role: "assistant",
+          timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          content: `⚠️ **${errData?.error?.code || "AI Gateway Error"}**: ${errData?.error?.message || "Request rejected by server AI Gateway."}`,
+        };
+      }
+    } catch {
+      // Fallback to local orchestrator if fetch is interrupted
+    }
+  }
+
   const historyTuples = chatHistory.map((m) => ({
     role: m.role,
     content: m.content,
   }));
 
+  const { AIOrchestrator } = await import("./ai/orchestrator");
   const result = await AIOrchestrator.processQuery({
     query: userQuery,
     ws,
     activeNode,
-    userId,
+    userId: effectiveUserId,
     modelPreference,
     chatHistory: historyTuples,
   });

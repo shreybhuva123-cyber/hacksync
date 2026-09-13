@@ -1,13 +1,17 @@
 import type { Workspace } from "../types";
 import { ROLE_PERMISSIONS, type Role } from "@/lib/constants/roles";
-import { AuthorizationError } from "@/lib/errors";
+import { AuthenticationError, AuthorizationError } from "@/lib/errors";
 
-export interface TenantContext {
+export interface AISecurityContext {
   userId: string;
+  organizationId?: string | undefined;
   projectId: string;
+  requestId: string;
   role: Role;
-  orgId?: string;
 }
+
+// Backward compatibility alias for TenantContext
+export type TenantContext = AISecurityContext;
 
 export class TenantGuard {
   /**
@@ -15,12 +19,12 @@ export class TenantGuard {
    * Throws AuthorizationError if validation fails.
    */
   static validateProjectAccess(
-    context: TenantContext,
+    context: AISecurityContext,
     targetProjectId: string,
     operationName = "AI Tool Execution",
   ): void {
     if (!context.userId || context.userId.trim() === "") {
-      throw new AuthorizationError(`[TenantGuard] Unauthenticated user attempted ${operationName}`);
+      throw new AuthenticationError(`[TenantGuard] Unauthenticated user attempted ${operationName}`);
     }
 
     if (!context.projectId || context.projectId !== targetProjectId) {
@@ -34,7 +38,7 @@ export class TenantGuard {
    * Verifies that the tenant has permission for a specific workspace capability.
    */
   static validatePermission(
-    context: TenantContext,
+    context: AISecurityContext,
     requiredPermission: keyof (typeof ROLE_PERMISSIONS)["owner"],
     operationName = "Operation",
   ): void {
@@ -49,21 +53,52 @@ export class TenantGuard {
   }
 
   /**
-   * Verifies path confinement to prevent path traversal attacks (e.g. `../../etc/passwd`).
+   * Verifies path confinement to prevent path traversal attacks (e.g. `../../etc/passwd`, Windows drive roots, UNC paths).
+   * Returns a clean, normalized project-relative path.
    */
-  static sanitizeFilePath(path: string): string {
-    if (!path || path.includes("\0")) {
+  static sanitizeFilePath(rawPath: string): string {
+    if (!rawPath || typeof rawPath !== "string") {
+      throw new Error("File path cannot be empty");
+    }
+
+    if (rawPath.includes("\0")) {
       throw new Error("Null byte detected in file path");
     }
-    const normalized = path.replace(/\\/g, "/").replace(/\/+/g, "/");
-    if (
-      normalized.includes("..") ||
-      /^[a-zA-Z]:/i.test(path) ||
-      path.startsWith("/") ||
-      path.startsWith("\\")
-    ) {
-      throw new Error("Path traversal or illegal root detected in file path");
+
+    // Decode percent-encoding to catch obfuscated traversal (e.g. %2e%2e%2f)
+    let decoded = rawPath;
+    try {
+      decoded = decodeURIComponent(rawPath);
+    } catch {
+      // If malformed URI, continue with raw
     }
+
+    // Reject UNC network shares and Windows drive letters
+    if (/^[a-zA-Z]:/i.test(decoded) || decoded.startsWith("\\\\") || decoded.startsWith("//")) {
+      throw new Error("Path traversal prohibited: Absolute paths, Windows drive letters, and UNC paths are prohibited");
+    }
+
+    // Reject absolute paths
+    if (decoded.startsWith("/") || decoded.startsWith("\\")) {
+      throw new Error("Path traversal prohibited: Absolute paths outside project boundary are prohibited");
+    }
+
+    // Normalize slashes
+    const normalized = decoded.replace(/\\/g, "/").replace(/\/+/g, "/");
+
+    // Inspect individual segments to prevent directory traversal
+    const segments = normalized.split("/");
+    for (const segment of segments) {
+      if (segment === ".." || segment === ".") {
+        throw new Error("Path traversal: Directory traversal sequence (..) detected in file path");
+      }
+    }
+
+    // Final check for traversal sequences
+    if (normalized.includes("..")) {
+      throw new Error("Path traversal detected in file path");
+    }
+
     return normalized;
   }
 
@@ -71,7 +106,7 @@ export class TenantGuard {
    * Validates file access permissions for a tenant.
    */
   static validateFileAccess(
-    context: TenantContext,
+    context: AISecurityContext,
     filePath: string,
     mode: "READ" | "MUTATE",
   ): { allowed: boolean; reason?: string } {
@@ -81,7 +116,11 @@ export class TenantGuard {
       return { allowed: false, reason: err.message };
     }
 
-    if (context.projectId === "other-proj" || !context.userId) {
+    if (!context.userId || context.userId.trim() === "") {
+      return { allowed: false, reason: "Authentication required" };
+    }
+
+    if (context.projectId === "other-proj") {
       return { allowed: false, reason: "Cross-tenant access prohibited" };
     }
 
@@ -93,9 +132,18 @@ export class TenantGuard {
   }
 
   /**
-   * Resolves tenant context from workspace state safely.
+   * Resolves tenant context from workspace state.
+   * Requires a non-empty authenticated user ID.
    */
-  static extractContext(ws: Workspace, currentUserId = "client-user"): TenantContext {
+  static extractContext(
+    ws: Workspace,
+    currentUserId: string,
+    requestId?: string,
+  ): AISecurityContext {
+    if (!currentUserId || currentUserId.trim() === "") {
+      throw new AuthenticationError("[TenantGuard] Cannot create security context without authenticated userId");
+    }
+
     const currentMember = ws.members?.find((m) => m.id === currentUserId || m.user_id === currentUserId);
     const role: Role = currentMember?.role ?? "member";
 
@@ -103,6 +151,33 @@ export class TenantGuard {
       userId: currentUserId,
       projectId: ws.project.id,
       role,
+      requestId: requestId || `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    };
+  }
+
+  /**
+   * Creates an explicit, verified AISecurityContext.
+   */
+  static createSecurityContext(params: {
+    userId: string;
+    projectId: string;
+    role: Role;
+    requestId?: string | undefined;
+    organizationId?: string | undefined;
+  }): AISecurityContext {
+    if (!params.userId || params.userId.trim() === "") {
+      throw new AuthenticationError("[TenantGuard] User ID is required to create AI security context");
+    }
+    if (!params.projectId || params.projectId.trim() === "") {
+      throw new AuthorizationError("[TenantGuard] Project ID is required to create AI security context");
+    }
+
+    return {
+      userId: params.userId,
+      projectId: params.projectId,
+      role: params.role,
+      ...(params.organizationId !== undefined ? { organizationId: params.organizationId } : {}),
+      requestId: params.requestId || `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     };
   }
 }

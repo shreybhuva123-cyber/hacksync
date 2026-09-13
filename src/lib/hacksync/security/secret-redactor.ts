@@ -39,16 +39,48 @@ const REDACTION_PATTERNS: {
     name: "Google API Key",
     category: "api_key",
     severity: "high",
-    regex: /AIza[0-9A-Za-z\-_]{30,45}/g,
+    regex: /AIza[0-9A-Za-z\-_]{20,50}/g,
     mask: "[REDACTED_GOOGLE_KEY]",
+  },
+  // Anthropic API Key
+  {
+    name: "Anthropic API Key",
+    category: "api_key",
+    severity: "critical",
+    regex: /sk-ant-(?:api)?[0-9a-zA-Z_-]{10,}/g,
+    mask: "[REDACTED_ANTHROPIC_KEY]",
   },
   // OpenAI API Key
   {
     name: "OpenAI API Key",
     category: "api_key",
     severity: "critical",
-    regex: /sk-(?:proj-)?[a-zA-Z0-9_-]{32,}/g,
+    regex: /sk-(?!ant-)(?:proj-)?[a-zA-Z0-9_-]{20,}/g,
     mask: "[REDACTED_OPENAI_KEY]",
+  },
+  // GitHub Personal Access Token
+  {
+    name: "GitHub Token",
+    category: "api_key",
+    severity: "critical",
+    regex: /(?:ghp_[a-zA-Z0-9]{36}|github_pat_[a-zA-Z0-9_]{82})/g,
+    mask: "[REDACTED_GITHUB_TOKEN]",
+  },
+  // Supabase Service Role Key
+  {
+    name: "Supabase Service Role Key",
+    category: "jwt",
+    severity: "critical",
+    regex: /sb_secret_[a-zA-Z0-9_\-]{20,}/g,
+    mask: "[REDACTED_SUPABASE_SECRET]",
+  },
+  // Bearer Token in Headers / Auth String
+  {
+    name: "Bearer Token",
+    category: "jwt",
+    severity: "high",
+    regex: /Bearer\s+([a-zA-Z0-9\-._~+/]+=*)/gi,
+    mask: "Bearer [REDACTED_BEARER_TOKEN]",
   },
   // Database Connection URL with Password
   {
@@ -90,7 +122,7 @@ export class SecretRedactor {
     const detections: SecretDetection[] = [];
 
     for (const p of REDACTION_PATTERNS) {
-      // Test if pattern exists
+      p.regex.lastIndex = 0;
       if (p.regex.test(redactedText)) {
         detections.push({
           patternName: p.name,
@@ -98,10 +130,9 @@ export class SecretRedactor {
           severity: p.severity,
         });
 
-        // Replace all occurrences
+        p.regex.lastIndex = 0;
         redactedText = redactedText.replace(p.regex, p.mask);
       }
-      // Reset regex state after test/replace
       p.regex.lastIndex = 0;
     }
 
@@ -116,8 +147,10 @@ export class SecretRedactor {
     for (const p of REDACTION_PATTERNS) {
       p.regex.lastIndex = 0;
       if (p.regex.test(content)) {
+        p.regex.lastIndex = 0;
         return true;
       }
+      p.regex.lastIndex = 0;
     }
     return false;
   }
