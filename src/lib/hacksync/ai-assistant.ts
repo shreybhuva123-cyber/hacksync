@@ -301,21 +301,24 @@ export async function askWorkspaceCopilot(
   chatHistory: CopilotMessage[] = [],
   userId?: string | undefined,
   modelPreference = "builtin",
+  overrideAuthToken?: string,
 ): Promise<CopilotMessage> {
-  let authToken: string | undefined;
+  let authToken: string | undefined = overrideAuthToken;
   let authenticatedUserId = userId && userId !== "client-user" ? userId : undefined;
 
   // Retrieve current authenticated session token from Supabase
-  try {
-    const { data } = await supabase.auth.getSession();
-    if (data?.session?.access_token) {
-      authToken = data.session.access_token;
-      if (data.session.user?.id) {
-        authenticatedUserId = data.session.user.id;
+  if (!authToken) {
+    try {
+      const { data } = await supabase.auth.getSession();
+      if (data?.session?.access_token) {
+        authToken = data.session.access_token;
+        if (data.session.user?.id) {
+          authenticatedUserId = data.session.user.id;
+        }
       }
+    } catch {
+      // Offline or test environment
     }
-  } catch {
-    // Offline or test environment
   }
 
   const effectiveUserId =
@@ -336,14 +339,34 @@ export async function askWorkspaceCopilot(
     };
   }
 
-  // If in browser and workspace is available, dispatch query to backend AI gateway
-  if (typeof window !== "undefined" && ws?.project?.id && typeof fetch === "function") {
+  // If in browser, strictly route all requests to the backend AI gateway
+  if (typeof window !== "undefined") {
+    // 1. Require authentic session token — never send raw user IDs
+    if (!authToken) {
+      return {
+        id: `copilot-auth-${Date.now()}`,
+        role: "assistant",
+        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        content: "🔒 **Authentication Required**: Please sign in to use HackSync AI Copilot. A valid session token is required to communicate with the secure AI Gateway.",
+      };
+    }
+
+    // 2. Require active project
+    if (!ws?.project?.id) {
+      return {
+        id: `copilot-err-${Date.now()}`,
+        role: "assistant",
+        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        content: "⚠️ **No Active Workspace**: Please select or create a project workspace before querying the AI Copilot.",
+      };
+    }
+
     try {
       const response = await fetch("/api/ai/query", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(authToken ? { Authorization: `Bearer ${authToken}` } : { Authorization: `Bearer ${effectiveUserId}` }),
+          Authorization: `Bearer ${authToken}`,
         },
         body: JSON.stringify({
           query: userQuery,
@@ -373,19 +396,32 @@ export async function askWorkspaceCopilot(
           modelUsed: data.modelUsed,
           pendingApproval: latestPending,
         };
-      } else if (response.status >= 400 && response.status < 500) {
-        const errData = await response.json().catch(() => ({}));
-        return {
-          id: `copilot-err-${Date.now()}`,
-          role: "assistant",
-          timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-          content: `⚠️ **${errData?.error?.code || "AI Gateway Error"}**: ${errData?.error?.message || "Request rejected by server AI Gateway."}`,
-        };
       }
+
+      const errData = await response.json().catch(() => ({}));
+      return {
+        id: `copilot-err-${Date.now()}`,
+        role: "assistant",
+        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        content: `⚠️ **${errData?.error?.code || "AI Gateway Error"}**: ${errData?.error?.message || "Request rejected by server AI Gateway."}`,
+      };
     } catch {
-      // Fallback to local orchestrator if fetch is interrupted
+      // Never fall back to executing local orchestrator in browser
+      return {
+        id: `copilot-err-${Date.now()}`,
+        role: "assistant",
+        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        content: "⚠️ **AI Service Unavailable**: Unable to reach the HackSync AI Gateway. Please check your network connection or try again shortly.",
+      };
     }
   }
+
+  // Server / Test runner execution path only (offline unit tests)
+  const serverUserId =
+    authenticatedUserId ||
+    ws?.members?.[0]?.user_id ||
+    ws?.project?.created_by ||
+    "test-runner-user";
 
   const historyTuples = chatHistory.map((m) => ({
     role: m.role,
@@ -397,7 +433,7 @@ export async function askWorkspaceCopilot(
     query: userQuery,
     ws,
     activeNode,
-    userId: effectiveUserId,
+    userId: serverUserId,
     modelPreference,
     chatHistory: historyTuples,
   });

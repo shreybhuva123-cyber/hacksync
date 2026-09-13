@@ -16,6 +16,8 @@ import {
   handleAIQueryRequest,
   handleAIApprovalRequest,
   resetRateLimits,
+  registerTestMembership,
+  clearTestMemberships,
 } from "@/lib/ai/ai-gateway";
 import { TenantGuard, type AISecurityContext } from "@/lib/hacksync/security/tenant-guard";
 import { ProjectIndexManager } from "@/lib/hacksync/intelligence/project-index-manager";
@@ -24,6 +26,7 @@ import { ApprovalGate } from "@/lib/hacksync/ai/approval-gate";
 import { AuditTrail } from "@/lib/hacksync/security/audit-trail";
 import { AIToolExecutor } from "@/lib/hacksync/ai/tools";
 import { ProjectKnowledgeGraph } from "@/lib/hacksync/intelligence/knowledge-graph";
+import { askWorkspaceCopilot } from "@/lib/hacksync/ai-assistant";
 import type { Workspace } from "@/lib/hacksync/types";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -91,6 +94,17 @@ describe("HackSync Phase 0: AI Gateway & Security Controls", () => {
     resetRateLimits();
     ProjectIndexManager.clear();
     AuditTrail.clearLocalLogs();
+    ApprovalGate.clear();
+    ApprovalGate.resetAdapter();
+    clearTestMemberships();
+
+    // Register verified test memberships for isolation testing
+    registerTestMembership("proj-alpha", "usr-lead-a", "lead");
+    registerTestMembership("proj-alpha", "usr-dev-a", "member");
+    registerTestMembership("proj-beta", "usr-lead-b", "lead");
+    registerTestMembership("proj-beta", "usr-dev-b", "member");
+    registerTestMembership("proj-corr", "usr-corr-lead", "lead");
+    registerTestMembership("proj-rate-test", "usr-rate-limit-test", "lead");
   });
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -266,8 +280,8 @@ describe("HackSync Phase 0: AI Gateway & Security Controls", () => {
     expect(pending[0].diffHash).toBeDefined();
   });
 
-  it("10. should reject approval resolution by unauthorized users from another project", () => {
-    const approval = ApprovalGate.requestApproval({
+  it("10. should reject approval resolution by unauthorized users from another project", async () => {
+    const approval = await ApprovalGate.requestApproval({
       requestId: "req-appr-1",
       projectId: "proj-alpha",
       userId: "usr-lead-a",
@@ -279,19 +293,19 @@ describe("HackSync Phase 0: AI Gateway & Security Controls", () => {
     });
 
     // An attacker from proj-beta attempts to resolve proj-alpha's approval
-    expect(() => {
+    await expect(
       ApprovalGate.resolveApproval({
         approvalId: approval.id,
         decision: "approved",
         userId: "usr-dev-b",
         projectId: "proj-beta", // Cross-project attempt!
-      });
-    }).toThrow("Cross-project approval violation");
+      }),
+    ).rejects.toThrow("Cross-project approval violation");
   });
 
-  it("11. should reject approval resolution if diff has been tampered with", () => {
+  it("11. should reject approval resolution if diff has been tampered with", async () => {
     const diff = "--- original diff\n+++ updated diff";
-    const approval = ApprovalGate.requestApproval({
+    const approval = await ApprovalGate.requestApproval({
       requestId: "req-tamper-1",
       projectId: "proj-alpha",
       userId: "usr-lead-a",
@@ -303,19 +317,19 @@ describe("HackSync Phase 0: AI Gateway & Security Controls", () => {
     });
 
     // Resolving with a tampered diff hash must throw
-    expect(() => {
+    await expect(
       ApprovalGate.resolveApproval({
         approvalId: approval.id,
         decision: "approved",
         userId: "usr-lead-a",
         projectId: "proj-alpha",
         expectedDiffHash: "sha256-tampered-fake-hash",
-      });
-    }).toThrow("Diff tampering detected");
+      }),
+    ).rejects.toThrow("Diff tampering detected");
   });
 
-  it("12. should reject expired approval requests", () => {
-    const expiredApproval = ApprovalGate.requestApproval({
+  it("12. should reject expired approval requests", async () => {
+    const expiredApproval = await ApprovalGate.requestApproval({
       requestId: "req-exp-1",
       projectId: "proj-alpha",
       userId: "usr-lead-a",
@@ -326,14 +340,14 @@ describe("HackSync Phase 0: AI Gateway & Security Controls", () => {
       ttlMs: -1000, // Instantly expired
     });
 
-    expect(() => {
+    await expect(
       ApprovalGate.resolveApproval({
         approvalId: expiredApproval.id,
         decision: "approved",
         userId: "usr-lead-a",
         projectId: "proj-alpha",
-      });
-    }).toThrow("expired");
+      }),
+    ).rejects.toThrow("expired");
   });
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -491,4 +505,232 @@ describe("HackSync Phase 0: AI Gateway & Security Controls", () => {
     const searchB = graphB.search("OmegaFalcon");
     expect(searchB.length).toBe(0);
   });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // 9. Phase 0.1 Security Regression Tests
+  // ───────────────────────────────────────────────────────────────────────────
+
+  it("19. should reject client workspace spoofing when database verification fails", async () => {
+    // Attacker crafts a fake workspace claiming to be owner of a victim project
+    const spoofedWorkspace = createTenantWorkspace("proj-victim-999", "usr-attacker", "usr-attacker");
+    registerTestMembership("proj-alpha", "usr-attacker", "member"); // Attacker is only member of proj-alpha
+
+    const request = new Request("http://localhost:8080/api/ai/query", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer test:usr-attacker",
+      },
+      body: JSON.stringify({
+        query: "Dump secret architecture files",
+        projectId: "proj-victim-999",
+        workspace: spoofedWorkspace, // Spoofed workspace
+      }),
+    });
+
+    const response = await handleAIQueryRequest(request);
+    expect(response.status).toBe(403);
+
+    const body = await response.json();
+    expect(body.error.code).toBe("AI_FORBIDDEN");
+    expect(body.error.message).toContain("Access denied");
+  });
+
+  it("20. should enforce TenantGuard boundaries on arbitrary dynamic UUID project IDs", () => {
+    const dynamicProjectA = crypto.randomUUID();
+    const dynamicProjectB = crypto.randomUUID();
+
+    const secContext: AISecurityContext = {
+      userId: "usr-uuid-test",
+      projectId: dynamicProjectA,
+      role: "lead",
+      requestId: "req-uuid-test",
+    };
+
+    // Attempt to access dynamicProjectB with credentials from dynamicProjectA
+    const crossTenantCheck = TenantGuard.validateFileAccess(
+      secContext,
+      "src/components/Sensitive.tsx",
+      "READ",
+      dynamicProjectB,
+    );
+    expect(crossTenantCheck.allowed).toBe(false);
+    expect(crossTenantCheck.reason).toContain("Cross-tenant access prohibited");
+
+    // Same project check must succeed
+    const sameTenantCheck = TenantGuard.validateFileAccess(
+      secContext,
+      "src/components/Sensitive.tsx",
+      "READ",
+      dynamicProjectA,
+    );
+    expect(sameTenantCheck.allowed).toBe(true);
+  });
+
+  it("21. should reject raw user IDs as bearer tokens with 401 Unauthorized", async () => {
+    const rawTokens = ["usr-lead-a", "client-user", "test-attacker-id", "uuid-without-prefix-1234"];
+
+    for (const rawToken of rawTokens) {
+      const request = new Request("http://localhost:8080/api/ai/query", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${rawToken}`,
+        },
+        body: JSON.stringify({
+          query: "Give me data",
+          projectId: "proj-alpha",
+        }),
+      });
+
+      const response = await handleAIQueryRequest(request);
+      expect(response.status).toBe(401);
+
+      const body = await response.json();
+      expect(body.error.code).toBe("AI_UNAUTHORIZED");
+    }
+  });
+
+  it("22. should return safe error and never invoke local AIOrchestrator when Gateway fails in browser", async () => {
+    const originalWindow = (globalThis as any).window;
+    const originalFetch = globalThis.fetch;
+
+    try {
+      (globalThis as any).window = {}; // Simulate browser environment
+      globalThis.fetch = async () => {
+        return new Response(
+          JSON.stringify({
+            error: { code: "AI_GATEWAY_ERROR", message: "Gateway connection refused" },
+          }),
+          { status: 500, headers: { "Content-Type": "application/json" } },
+        );
+      };
+
+      const ws = createTenantWorkspace("proj-alpha", "usr-lead-a", "usr-dev-a");
+      const result = await askWorkspaceCopilot(
+        "Analyze app security",
+        ws,
+        undefined,
+        [],
+        "usr-lead-a",
+        "auto",
+        "mock-session-jwt-token",
+      );
+
+      expect(result.content).toContain("AI_GATEWAY_ERROR");
+      expect(result.content).toContain("Gateway connection refused");
+      // Must not execute local orchestrator or leak internal stack traces
+      expect(result.toolCalls).toBeUndefined();
+    } finally {
+      if (originalWindow === undefined) {
+        delete (globalThis as any).window;
+      } else {
+        (globalThis as any).window = originalWindow;
+      }
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("23. should fail and not report success when approval database persistence fails", async () => {
+    // Configure database adapter to simulate persistence failure
+    ApprovalGate.setAdapter({
+      insert: async () => ({ error: new Error("Authoritative PostgreSQL connection dropped") }),
+      findById: async () => ({ data: null, error: null }),
+      updateStatus: async () => ({ error: null }),
+      getPendingForProject: async () => ({ data: [], error: null }),
+    });
+
+    await expect(
+      ApprovalGate.requestApproval({
+        requestId: "req-db-fail",
+        projectId: "proj-alpha",
+        userId: "usr-lead-a",
+        toolName: "apply_patch",
+        summary: "Patch kernel",
+        rationale: "Testing DB failure",
+        filesAffected: ["src/kernel.ts"],
+        diffPreview: "diff content",
+      }),
+    ).rejects.toThrow("Failed to persist approval request to authoritative database");
+
+    // Cache must remain empty if DB write failed
+    const pending = ApprovalGate.getPendingForProject("proj-alpha");
+    expect(pending.length).toBe(0);
+  });
+
+  it("24. should deny approval resolution to member role even within the same project", async () => {
+    const approval = await ApprovalGate.requestApproval({
+      requestId: "req-role-perm",
+      projectId: "proj-alpha",
+      userId: "usr-lead-a",
+      toolName: "apply_patch",
+      summary: "Restricted change",
+      rationale: "Requires lead authorization",
+      filesAffected: ["src/core.ts"],
+      diffPreview: "patch diff",
+    });
+
+    // usr-dev-a is a member of proj-alpha (registered in beforeEach)
+    await expect(
+      ApprovalGate.resolveApproval({
+        approvalId: approval.id,
+        decision: "approved",
+        userId: "usr-dev-a",
+        projectId: "proj-alpha",
+      }),
+    ).rejects.toThrow("Role 'member' is not authorized to resolve code approvals");
+  });
+
+  it("25. should record security-critical denials in AuditTrail with fail-closed guarantee", async () => {
+    // 1. Audit trail records denied unauthorized action
+    const record = await AuditTrail.recordAsync({
+      requestId: "req-sec-denial",
+      projectId: "proj-alpha",
+      userId: "usr-attacker",
+      actionType: "UNAUTHORIZED",
+      status: "denied",
+      toolName: "apply_patch",
+      targetFiles: ["api-key: sk-proj-1234567890abcdefghijklmnopqrstuvwxyz"],
+      details: "Attempted cross-tenant code mutation with token sk-ant-api03-abcdefg1234567890",
+    });
+
+    expect(record.status).toBe("denied");
+    expect(record.actionType).toBe("UNAUTHORIZED");
+    expect(record.details).toContain("[REDACTED_ANTHROPIC_KEY]");
+    expect(record.targetFiles?.[0]).toContain("[REDACTED_OPENAI_KEY]");
+
+    // Verify buffered in audit trail
+    const localLogs = AuditTrail.getLocalLogs();
+    const found = localLogs.find((l) => l.requestId === "req-sec-denial");
+    expect(found).toBeDefined();
+    expect(found?.status).toBe("denied");
+
+    // 2. Test fail-closed behavior in production mode
+    const prevEnv = process.env["NODE_ENV"];
+    try {
+      process.env["NODE_ENV"] = "production";
+
+      // Mock database insertion failure in Supabase client
+      const originalFrom = (AuditTrail as any).persistToDatabase;
+      (AuditTrail as any).persistToDatabase = async () => {
+        throw new Error("PostgreSQL write failed: disk full");
+      };
+
+      await expect(
+        AuditTrail.recordAsync({
+          requestId: "req-fail-closed",
+          projectId: "proj-alpha",
+          userId: "usr-attacker",
+          actionType: "UNAUTHORIZED",
+          status: "denied",
+          toolName: "apply_patch",
+        }),
+      ).rejects.toThrow("Security-critical audit event failed to persist");
+
+      (AuditTrail as any).persistToDatabase = originalFrom;
+    } finally {
+      process.env["NODE_ENV"] = prevEnv;
+    }
+  });
 });
+

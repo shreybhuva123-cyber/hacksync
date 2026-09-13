@@ -1,6 +1,6 @@
 import type { ConversationState, AIIntentType } from "./types";
 
-const DEFAULT_USER = "client-user";
+const DEFAULT_USER = "session:ephemeral";
 
 export class ConversationMemory {
   /**

@@ -278,7 +278,7 @@ Return:
           const targetFile = String(args["targetFile"] || args["path"] || "unknown");
           const patchDiff = String(args["patch"] || args["diff"] || "");
 
-          const approvalReq = ApprovalGate.createApprovalRequest({
+          const approvalReq = await ApprovalGate.createApprovalRequest({
             requestId: this.requestId,
             projectId: this.context.projectId,
             userId: this.context.userId,

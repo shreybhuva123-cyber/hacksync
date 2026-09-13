@@ -27,7 +27,7 @@ import {
   type LLMProviderType,
 } from "@/lib/hacksync/llm-provider";
 import { cn } from "@/lib/utils";
-import { ApprovalGate } from "@/lib/hacksync/ai/approval-gate";
+import { supabase } from "@/integrations/supabase/client";
 import { ProjectHealthCalculator } from "@/lib/hacksync/security/health-score";
 import { AIEvaluator } from "@/lib/hacksync/evaluation/evaluator";
 import { ProjectKnowledgeGraph } from "@/lib/hacksync/intelligence/knowledge-graph";
@@ -126,14 +126,54 @@ I have direct access to your repository structure, database schema, and live int
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isThinking]);
 
-  const handleResolveApproval = (approvalId: string, decision: "approved" | "rejected") => {
+  const handleResolveApproval = async (approvalId: string, decision: "approved" | "rejected") => {
+    if (!ws?.project?.id) return;
+
     try {
-      ApprovalGate.resolveApproval({
-        approvalId,
-        decision,
-        userId: ws?.members?.[0]?.user_id || ws?.project?.created_by || "usr-lead-1",
-        projectId: ws?.project?.id || "default-project",
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (!token) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `auth-err-${Date.now()}`,
+            role: "assistant",
+            timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+            content: "🔒 **Authentication Required**: Please sign in to resolve AI approval requests.",
+            intent: "fix",
+          },
+        ]);
+        return;
+      }
+
+      const response = await fetch("/api/ai/approval", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          approvalId,
+          decision,
+          projectId: ws.project.id,
+        }),
       });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `err-${Date.now()}`,
+            role: "assistant",
+            timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+            content: `⚠️ **Approval Failed**: ${errData?.error?.message || "Server rejected approval resolution."}`,
+            intent: "fix",
+          },
+        ]);
+        return;
+      }
+
       setMessages((prev) =>
         prev.map((msg) => {
           if (msg.pendingApproval?.id === approvalId) {
@@ -148,10 +188,12 @@ I have direct access to your repository structure, database schema, and live int
           return msg;
         }),
       );
+
       const confirmationText =
         decision === "approved"
           ? `✅ **Approval Confirmed**: User explicitly authorized mutating tool execution. Modifications applied.`
           : `🛑 **Approval Denied**: Mutating tool execution was rejected by user. Workspace files remain untouched.`;
+
       setMessages((prev) => [
         ...prev,
         {
@@ -284,7 +326,7 @@ REQUIREMENTS:
         ws ?? null,
         null,
         newHistory,
-        "client-user",
+        undefined,
         settings.provider,
       );
       setMessages((prev) => [...prev, response]);

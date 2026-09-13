@@ -1,5 +1,4 @@
 import type { Workspace, CodeNode } from "./types";
-import { processServerAIQuery } from "@/lib/ai/ai-gateway";
 import { logger } from "@/lib/errors";
 
 export type LLMProviderType = "builtin" | "gemini" | "openai";
@@ -388,8 +387,6 @@ export async function executeOperation<T>(params: { id: string; payload?: unknow
 // Unified LLM Query Dispatcher (with AI Orchestrator & Evidence Engine)
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { AIOrchestrator } from "./ai/orchestrator";
-
 export async function queryLLM(
   prompt: string,
   ws?: Workspace | null,
@@ -397,6 +394,7 @@ export async function queryLLM(
   chatHistory: { role: string; content: string }[] = [],
   modelPreference = "builtin",
 ): Promise<{ text: string; providerUsed: string }> {
+  const { AIOrchestrator } = await import("./ai/orchestrator");
   const result = await AIOrchestrator.processQuery({
     query: prompt,
     ws,

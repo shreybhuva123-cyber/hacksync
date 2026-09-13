@@ -127,6 +127,14 @@ export function resetRateLimits(): void {
 // Authentication & Tenant Verification Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
+export {
+  verifyProjectMembership,
+  registerTestMembership,
+  clearTestMemberships,
+} from "@/lib/security/tenant-verifier";
+
+import { verifyProjectMembership } from "@/lib/security/tenant-verifier";
+
 export async function authenticateRequest(request: Request): Promise<{ userId: string; email?: string } | null> {
   const authHeader = request.headers.get("Authorization") || request.headers.get("authorization");
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -136,11 +144,15 @@ export async function authenticateRequest(request: Request): Promise<{ userId: s
   const token = authHeader.substring(7).trim();
   if (!token) return null;
 
-  // In test/dev environments, allow formatted test credentials
-  const isTestOrDev = process.env["NODE_ENV"] !== "production";
-  if (isTestOrDev && (token.startsWith("test:") || token.startsWith("usr-") || token.startsWith("test-"))) {
-    const userId = token.startsWith("test:") ? token.slice(5) : token;
+  // In test environment ONLY, allow explicit test: prefixed credentials for unit test isolation
+  if (process.env["NODE_ENV"] === "test" && token.startsWith("test:")) {
+    const userId = token.slice(5);
     return { userId, email: `${userId}@hacksync.dev` };
+  }
+
+  // Reject raw user IDs or test tokens in production / non-test environments
+  if (token.startsWith("usr-") || token.startsWith("test-") || token.startsWith("client-")) {
+    return null;
   }
 
   try {
@@ -152,54 +164,6 @@ export async function authenticateRequest(request: Request): Promise<{ userId: s
   } catch {
     return null;
   }
-}
-
-export async function verifyProjectMembership(
-  userId: string,
-  projectId: string,
-  workspace?: Workspace | null,
-): Promise<{ allowed: boolean; role: Role }> {
-  if (!userId || !projectId) {
-    return { allowed: false, role: "member" };
-  }
-
-  // 1. Check workspace state if provided
-  if (workspace && workspace.project && workspace.project.id === projectId) {
-    if (workspace.project.created_by === userId) {
-      return { allowed: true, role: "owner" };
-    }
-    const member = workspace.members?.find((m) => m.user_id === userId || m.id === userId);
-    if (member) {
-      return { allowed: true, role: member.role };
-    }
-  }
-
-  // 2. Query Supabase project_members
-  try {
-    const { data: memberData, error: memberError } = await (supabase.from as any)("project_members")
-      .select("role")
-      .eq("project_id", projectId)
-      .eq("user_id", userId)
-      .maybeSingle();
-
-    if (!memberError && memberData) {
-      return { allowed: true, role: (memberData.role as Role) || "member" };
-    }
-
-    // Check project creator
-    const { data: projectData, error: projectError } = await (supabase.from as any)("projects")
-      .select("created_by")
-      .eq("id", projectId)
-      .maybeSingle();
-
-    if (!projectError && projectData && projectData.created_by === userId) {
-      return { allowed: true, role: "owner" };
-    }
-  } catch {
-    // If database query fails, fall back to denying access unless workspace confirmed
-  }
-
-  return { allowed: false, role: "member" };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -303,7 +267,7 @@ export async function handleAIQueryRequest(request: Request): Promise<Response> 
   }
 
   // 5. Tenant Authorization & Project Membership Check
-  const membership = await verifyProjectMembership(userId, projectId, workspace);
+  const membership = await verifyProjectMembership(userId, projectId);
   if (!membership.allowed) {
     // Record security audit event
     AuditTrail.record({
@@ -424,7 +388,7 @@ export async function handleAIApprovalRequest(request: Request): Promise<Respons
   }
 
   try {
-    const resolved = ApprovalGate.resolveApproval({
+    const resolved = await ApprovalGate.resolveApproval({
       approvalId,
       decision,
       userId,
@@ -482,9 +446,16 @@ export async function processServerAIQuery(
   checkRateLimit(clientKey);
   const validated = aiQuerySchema.parse(input);
 
+  const requestId = AIObservability.generateRequestId();
   const res = await AIOrchestrator.processQuery({
     query: validated.prompt,
     userId: clientKey,
+    securityContext: {
+      userId: clientKey,
+      projectId: "server-orchestration",
+      role: "owner",
+      requestId,
+    },
     modelPreference: validated.model,
     chatHistory: validated.chatHistory,
   });

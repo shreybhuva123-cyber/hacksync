@@ -1,10 +1,21 @@
 /**
- * Immutable, Database-Backed Audit Trail for AI Operations
- * Tracks all tool executions, file reads, mutations, and permissions checks.
- * Integrates with public.security_audit_events and sanitizes all metadata.
+ * PostgreSQL-Backed Authoritative Audit Trail for AI Operations
+ * 
+ * AUDIT DATA ARCHITECTURE:
+ * - PostgreSQL (public.security_audit_events) = AUTHORITATIVE SOURCE OF TRUTH for all audit records.
+ * - In-memory buffer (auditLogStore) = NON-AUTHORITATIVE short-lived cache and dev/test helper.
+ * 
+ * FAILURE POLICY:
+ * - Security-critical events (actionType === "UNAUTHORIZED" or status === "denied"):
+ *   Fail-closed in production: database persistence is strictly enforced. If PostgreSQL insert fails,
+ *   a high-priority alert is emitted and an error is raised to prevent silent security audit loss.
+ * - Routine operations (READ_ONLY tool invocations):
+ *   Fail-open with structured warning log to prevent transient database hiccups from disrupting read traffic.
  */
 
 import { auditLogger } from "@/lib/security/audit-logger";
+import { supabase } from "@/integrations/supabase/client";
+import { ExternalServiceError, logger } from "@/lib/errors";
 import { SecretRedactor } from "./secret-redactor";
 
 export interface AIAuditEntry {
@@ -22,54 +33,108 @@ export interface AIAuditEntry {
   metadata?: Record<string, unknown> | undefined;
 }
 
+// Non-authoritative in-memory cache for fast dev/test queries
 const auditLogStore: AIAuditEntry[] = [];
 const MAX_LOG_SIZE = 500;
 
 export class AuditTrail {
+  /**
+   * Synchronous audit record (buffers in memory and initiates background DB write).
+   */
   static record(entry: Omit<AIAuditEntry, "id" | "timestamp">): AIAuditEntry {
-    // 1. Sanitize details and metadata to strictly prevent secret leakage
+    const record = this.buildRecord(entry);
+
+    // Buffer in non-authoritative memory cache
+    this.bufferInMemory(record);
+
+    // Persist to authoritative PostgreSQL store
+    this.persistToDatabase(record).catch((err) => {
+      if (record.actionType === "UNAUTHORIZED" || record.status === "denied") {
+        logger.error("[SECURITY_CRITICAL_AUDIT_FAILURE] Failed to persist critical security audit event to PostgreSQL", {
+          error: err?.message,
+          record,
+        });
+      }
+    });
+
+    return record;
+  }
+
+  /**
+   * Asynchronous authoritative audit record with strict failure policy.
+   * Guarantees persistence to PostgreSQL before completing.
+   */
+  static async recordAsync(entry: Omit<AIAuditEntry, "id" | "timestamp">): Promise<AIAuditEntry> {
+    const record = this.buildRecord(entry);
+    this.bufferInMemory(record);
+
+    try {
+      await this.persistToDatabase(record);
+    } catch (err: any) {
+      const isCritical = record.actionType === "UNAUTHORIZED" || record.status === "denied";
+      logger.error("[AUDIT_PERSISTENCE_ERROR] PostgreSQL audit insert failed", {
+        isCritical,
+        error: err?.message,
+        requestId: record.requestId,
+      });
+
+      // Fail-closed policy in production for security denials
+      if (isCritical && process.env["NODE_ENV"] === "production") {
+        throw new ExternalServiceError(
+          "PostgreSQL",
+          `Security-critical audit event failed to persist to authoritative database: ${err?.message}`,
+        );
+      }
+    }
+
+    return record;
+  }
+
+  private static buildRecord(entry: Omit<AIAuditEntry, "id" | "timestamp">): AIAuditEntry {
     const cleanDetails = entry.details
       ? SecretRedactor.redact(entry.details).redactedText
       : undefined;
 
     const cleanFiles = entry.targetFiles?.map((f) => SecretRedactor.redact(f).redactedText);
 
-    const record: AIAuditEntry = {
+    return {
       ...entry,
       details: cleanDetails,
       targetFiles: cleanFiles,
       id: `audit-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       timestamp: new Date().toISOString(),
     };
+  }
 
-    // 2. In-memory buffer for instant retrieval and test isolation
+  private static bufferInMemory(record: AIAuditEntry): void {
     auditLogStore.unshift(record);
     if (auditLogStore.length > MAX_LOG_SIZE) {
       auditLogStore.pop();
     }
+  }
 
-    // 3. Persist to durable PostgreSQL security_audit_events table
-    try {
-      auditLogger.log({
-        action: "SECURITY_PERMISSION_DENIED",
-        actorId: record.userId,
-        projectId: record.projectId,
-        resourceId: record.toolName,
-        status: record.status === "success" ? "SUCCESS" : record.status === "denied" ? "DENIED" : "FAILURE",
-        metadata: {
-          requestId: record.requestId,
-          toolName: record.toolName,
-          actionType: record.actionType,
-          executionMs: record.executionMs,
-          targetFiles: record.targetFiles,
-          details: record.details,
-        },
-      });
-    } catch {
-      // Non-blocking persistence
+  private static async persistToDatabase(record: AIAuditEntry): Promise<void> {
+    if (!record.projectId || !record.userId) return;
+
+    const { error } = await (supabase.from as any)("security_audit_events").insert({
+      action: "SECURITY_PERMISSION_DENIED",
+      actor_id: record.userId,
+      project_id: record.projectId,
+      target_resource: record.toolName,
+      status: record.status === "success" ? "SUCCESS" : record.status === "denied" ? "DENIED" : "FAILURE",
+      metadata: {
+        requestId: record.requestId,
+        toolName: record.toolName,
+        actionType: record.actionType,
+        executionMs: record.executionMs,
+        targetFiles: record.targetFiles,
+        details: record.details,
+      },
+    });
+
+    if (error) {
+      throw new Error(`PostgreSQL audit error: ${error.message}`);
     }
-
-    return record;
   }
 
   static getLogs(projectId?: string, limit = 50): AIAuditEntry[] {

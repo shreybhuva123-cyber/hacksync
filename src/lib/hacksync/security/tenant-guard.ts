@@ -104,11 +104,13 @@ export class TenantGuard {
 
   /**
    * Validates file access permissions for a tenant.
+   * Generically validates user authentication, project confinement, role permissions, and path traversal.
    */
   static validateFileAccess(
     context: AISecurityContext,
     filePath: string,
     mode: "READ" | "MUTATE",
+    targetProjectId?: string,
   ): { allowed: boolean; reason?: string } {
     try {
       this.sanitizeFilePath(filePath);
@@ -120,7 +122,11 @@ export class TenantGuard {
       return { allowed: false, reason: "Authentication required" };
     }
 
-    if (context.projectId === "other-proj") {
+    if (!context.projectId || context.projectId.trim() === "") {
+      return { allowed: false, reason: "Project context required" };
+    }
+
+    if (targetProjectId && context.projectId !== targetProjectId) {
       return { allowed: false, reason: "Cross-tenant access prohibited" };
     }
 

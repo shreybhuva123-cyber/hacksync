@@ -2,7 +2,7 @@ import type { Workspace, CodeNode, MemberFile } from "../types";
 import { ProjectKnowledgeGraph } from "../intelligence/knowledge-graph";
 import { ProjectIndexManager } from "../intelligence/project-index-manager";
 import { TenantGuard, type AISecurityContext } from "../security/tenant-guard";
-import { AuthenticationError } from "@/lib/errors";
+import { AuthenticationError, AuthorizationError } from "@/lib/errors";
 import { AuditTrail } from "../security/audit-trail";
 import { AIObservability } from "./observability";
 import { AIToolExecutor } from "./tools";
@@ -22,7 +22,10 @@ export interface OrchestrationResult {
 }
 
 export class AIOrchestrator {
-  static getKnowledgeGraph(projectId = "default-project"): ProjectKnowledgeGraph {
+  static getKnowledgeGraph(projectId: string): ProjectKnowledgeGraph {
+    if (!projectId || projectId.trim() === "") {
+      throw new Error("[AIOrchestrator] Project ID is required to retrieve project knowledge graph");
+    }
     return ProjectIndexManager.getGraph(projectId);
   }
 
@@ -107,16 +110,7 @@ export class AIOrchestrator {
       }
       tenantContext = TenantGuard.extractContext(params.ws, resolvedUserId, requestId);
     } else {
-      const resolvedUserId = params.userId;
-      if (!resolvedUserId) {
-        throw new AuthenticationError("[AIOrchestrator] Authentication required. No securityContext or authenticated userId provided.");
-      }
-      tenantContext = {
-        userId: resolvedUserId,
-        projectId: "default-project",
-        role: "lead",
-        requestId,
-      };
+      throw new AuthorizationError("[AIOrchestrator] Project context required: cannot execute AI orchestration without an authorized project.");
     }
 
     const userId = tenantContext.userId;
