@@ -20,8 +20,9 @@ export class AIEvaluator {
     for (const testCase of BENCHMARK_DATASET) {
       const start = Date.now();
 
+      const testQuery = testCase.query || testCase.task?.query || "";
       const res = await AIOrchestrator.processQuery({
-        query: testCase.query,
+        query: testQuery,
         ws,
         modelPreference: "builtin",
       });
@@ -33,13 +34,13 @@ export class AIEvaluator {
 
       // 2. Evaluate Tools
       const executedToolNames = res.toolCalls.map((t) => t.name);
-      const toolsMatched = testCase.expectedTools.some((expTool) =>
+      const toolsMatched = (testCase.expectedTools || []).some((expTool) =>
         executedToolNames.includes(expTool),
       );
 
       // 3. Evaluate Keywords / Findings in response
       const outputLower = res.text.toLowerCase();
-      const hasKeywords = testCase.expectedKeywords.some((kw) =>
+      const hasKeywords = (testCase.expectedKeywords || []).some((kw) =>
         outputLower.includes(kw.toLowerCase()),
       );
 
