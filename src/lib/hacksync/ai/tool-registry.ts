@@ -66,6 +66,72 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
     },
   },
 
+  // ─── Phase 3 Security & Git Intelligence Tools ─────────────────────────────
+  security_scan: {
+    name: "security_scan",
+    description: "Run passive static security analysis across AST, SAST rules, and source-sink data flows.",
+    tier: "READ_ONLY",
+    parameters: {
+      targetFile: { type: "string", description: "Optional specific file to scan" },
+    },
+  },
+  secret_scan: {
+    name: "secret_scan",
+    description: "Scan project files for hardcoded secrets, API tokens, and credentials with guaranteed redaction.",
+    tier: "READ_ONLY",
+    parameters: {
+      targetFile: { type: "string", description: "Optional specific file to scan" },
+    },
+  },
+  dependency_vulnerabilities: {
+    name: "dependency_vulnerabilities",
+    description: "Analyze package dependencies (package.json, requirements.txt) against known security advisories.",
+    tier: "READ_ONLY",
+    parameters: {
+      manifestFile: { type: "string", description: "Manifest file name (defaults to package.json)" },
+    },
+  },
+  security_health: {
+    name: "security_health",
+    description: "Return a heuristic project security health score, risk breakdown, and engineering disclaimer.",
+    tier: "READ_ONLY",
+    parameters: {},
+  },
+  git_status: {
+    name: "git_status",
+    description: "Return structured repository status (branch, staged, unstaged, untracked, isClean).",
+    tier: "READ_ONLY",
+    parameters: {
+      repoPath: { type: "string", description: "Optional repository path" },
+    },
+  },
+  git_diff: {
+    name: "git_diff",
+    description: "Return parsed unified diff with structured hunks, additions, and deletions.",
+    tier: "READ_ONLY",
+    parameters: {
+      staged: { type: "boolean", description: "Whether to return staged changes" },
+      commitRange: { type: "string", description: "Optional commit range (e.g. HEAD~1..HEAD)" },
+      fileFilter: { type: "string", description: "Optional file path filter" },
+    },
+  },
+  git_changed_symbols: {
+    name: "git_changed_symbols",
+    description: "Map working diff hunks to AST symbols to identify changed functions, classes, and routes.",
+    tier: "READ_ONLY",
+    parameters: {
+      staged: { type: "boolean", description: "Whether to check staged changes" },
+    },
+  },
+  git_impact: {
+    name: "git_impact",
+    description: "Calculate estimated blast radius, downstream dependency impact, and security-sensitive changes for diffs.",
+    tier: "READ_ONLY",
+    parameters: {
+      staged: { type: "boolean", description: "Whether to check staged changes" },
+    },
+  },
+
   // ─── Backward-Compatible Aliases & Specialized Analysis Tools ──────────────
   search_project: {
     name: "search_project",
@@ -133,3 +199,14 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
     },
   },
 };
+
+export class ToolRegistry {
+  static getTool(name: string): ToolDefinition | undefined {
+    return TOOL_REGISTRY[name];
+  }
+
+  static getAllTools(): ToolDefinition[] {
+    return Object.values(TOOL_REGISTRY);
+  }
+}
+

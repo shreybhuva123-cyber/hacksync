@@ -23,6 +23,14 @@ import { TaskClassifier } from "./task-classifier";
 import { ContextPlanner } from "./context-planner";
 import { ExecutionBudgetManager } from "./execution-budget";
 import { OutputValidator } from "./output-validator";
+import { GitStatusManager } from "../git/git-status";
+import { GitAnalyzer } from "../git/git-analyzer";
+import type { SecurityFinding, SecurityHealthBreakdown, SecurityMode } from "../security/finding-types";
+import type { DependencyAdvisoryFinding } from "../security/dependency-vulnerability-scanner";
+import type { GitStatusSummary } from "../git/git-status";
+import type { ParsedFileDiff } from "../git/diff-parser";
+import type { ChangedSymbol } from "../git/changed-symbols";
+import type { GitImpactReport, SecuritySensitiveChange } from "../git/git-impact";
 
 export interface OrchestrationResult {
   text: string;
@@ -173,6 +181,17 @@ export class AIOrchestrator {
     const collectedFindings: AIFinding[] = [];
     const verifiedEvidence: VerifiedEvidenceItem[] = [];
 
+    // Phase 3 Results State
+    let phase3SecurityFindings: SecurityFinding[] | undefined;
+    let phase3SecurityHealth: SecurityHealthBreakdown | undefined;
+    let phase3DependencyFindings: DependencyAdvisoryFinding[] | undefined;
+    let phase3SecretsDetected: SecurityFinding[] | undefined;
+    let phase3GitStatus: GitStatusSummary | undefined;
+    let phase3DiffSummary: string | undefined;
+    let phase3ChangedFiles: ParsedFileDiff[] | undefined;
+    let phase3ChangedSymbols: ChangedSymbol[] | undefined;
+    let phase3ImpactAnalysis: GitImpactReport | undefined;
+
     // Execute appropriate tools based on task type / legacy intent
     if (legacyIntent === "fix") {
       const targetFindingId = activeBugId || collectedFindings[0]?.id || "FINDING-1";
@@ -207,26 +226,151 @@ export class AIOrchestrator {
         collectedFindings.push(...analyzeRes.data.findings);
       }
     } else if (legacyIntent === "security" || plan.taskType === "security" || plan.taskType === "dependency") {
-      const secRes = await toolExecutor.execute("analyze_security", {});
+      // Phase 3 Static Security Scan
+      const secScanRes = await toolExecutor.execute("security_scan", {});
       executedTools.push({
-        name: "analyze_security",
-        success: secRes.success,
-        summary: `Passive audit uncovered ${secRes.data?.totalFindings || 0} vulnerability flag(s)`,
-        executionMs: secRes.executionMs,
+        name: "security_scan",
+        success: secScanRes.success,
+        summary: `Passive SAST audit uncovered ${secScanRes.data?.summary?.total || 0} vulnerability finding(s)`,
+        executionMs: secScanRes.executionMs,
       });
 
-      const depRes = await toolExecutor.execute("analyze_dependencies", {});
+      if (secScanRes.data?.findings) {
+        phase3SecurityFindings = secScanRes.data.findings;
+        for (const f of secScanRes.data.findings) {
+          collectedFindings.push({
+            id: f.id,
+            title: f.title,
+            severity:
+              f.severity === "critical"
+                ? "CRITICAL"
+                : f.severity === "high"
+                  ? "HIGH"
+                  : f.severity === "medium"
+                    ? "MEDIUM"
+                    : "LOW",
+            confidence:
+              f.confidence === "very_high" ? 95 : f.confidence === "high" ? 85 : f.confidence === "medium" ? 65 : 40,
+            evidenceCount: 1,
+            primaryLocation: { filePath: f.filePath, line: f.startLine },
+            explanation: f.description,
+            impact: f.remediation,
+            recommendedFix: f.remediation,
+            evidenceItems: [
+              {
+                id: f.id,
+                filePath: f.filePath,
+                line: f.startLine,
+                snippet: f.evidence,
+                category: f.category,
+                reason: f.title,
+                severity:
+                  f.severity === "critical"
+                    ? "CRITICAL"
+                    : f.severity === "high"
+                      ? "HIGH"
+                      : f.severity === "medium"
+                        ? "MEDIUM"
+                        : "LOW",
+                confidence: 90,
+              },
+            ],
+          });
+        }
+      }
+
+      // Secret Scanner
+      const secretRes = await toolExecutor.execute("secret_scan", {});
       executedTools.push({
-        name: "analyze_dependencies",
+        name: "secret_scan",
+        success: secretRes.success,
+        summary: `Scanned files for credentials; detected ${secretRes.data?.totalSecrets || 0} secret(s)`,
+        executionMs: secretRes.executionMs,
+      });
+      if (secretRes.data?.findings) {
+        phase3SecretsDetected = secretRes.data.findings;
+      }
+
+      // Dependency Vulnerabilities
+      const depRes = await toolExecutor.execute("dependency_vulnerabilities", {});
+      executedTools.push({
+        name: "dependency_vulnerabilities",
         success: depRes.success,
-        summary: `Scanned ${depRes.data?.totalDependencies || 0} packages for advisories`,
+        summary: `Scanned dependencies for advisories (status: ${depRes.data?.status || "clean"})`,
         executionMs: depRes.executionMs,
       });
+      if (depRes.data?.findings) {
+        phase3DependencyFindings = depRes.data.findings;
+      }
 
-      if (secRes.data?.findings) {
-        collectedFindings.push(...secRes.data.findings);
+      // Security Health Score
+      const healthRes = await toolExecutor.execute("security_health", {});
+      executedTools.push({
+        name: "security_health",
+        success: healthRes.success,
+        summary: `Calculated heuristic security health score: ${healthRes.data?.score ?? "N/A"}/100`,
+        executionMs: healthRes.executionMs,
+      });
+      if (healthRes.data) {
+        phase3SecurityHealth = healthRes.data;
+      }
+    } else if (legacyIntent === "git" || plan.taskType === "git") {
+      const statusRes = await toolExecutor.execute("git_status", {});
+      executedTools.push({
+        name: "git_status",
+        success: statusRes.success,
+        summary: `Working tree ${statusRes.data?.state || "clean"} (${statusRes.data?.totalChangedFiles || 0} changed file(s))`,
+        executionMs: statusRes.executionMs,
+      });
+      if (statusRes.data) {
+        phase3GitStatus = statusRes.data;
+      }
+
+      const diffRes = await toolExecutor.execute("git_diff", {});
+      executedTools.push({
+        name: "git_diff",
+        success: diffRes.success,
+        summary: diffRes.data?.summaryText || "0 file(s) changed",
+        executionMs: diffRes.executionMs,
+      });
+      if (diffRes.data) {
+        phase3DiffSummary = diffRes.data.summaryText;
+        phase3ChangedFiles = diffRes.data.files;
+      }
+
+      const symRes = await toolExecutor.execute("git_changed_symbols", {});
+      executedTools.push({
+        name: "git_changed_symbols",
+        success: symRes.success,
+        summary: `Mapped ${symRes.data?.totalChangedSymbols || 0} changed symbol(s)`,
+        executionMs: symRes.executionMs,
+      });
+      if (symRes.data) {
+        phase3ChangedSymbols = symRes.data.changedSymbols;
+      }
+
+      const impactRes = await toolExecutor.execute("git_impact", {});
+      executedTools.push({
+        name: "git_impact",
+        success: impactRes.success,
+        summary: `Computed regression risk ${impactRes.data?.regressionRisk?.risk || "LOW"} (blast radius: ${impactRes.data?.regressionRisk?.blastRadiusScore || 0})`,
+        executionMs: impactRes.executionMs,
+      });
+      if (impactRes.data) {
+        phase3ImpactAnalysis = impactRes.data;
       }
     } else if (plan.taskType === "impact") {
+      const gitImpactRes = await toolExecutor.execute("git_impact", {});
+      executedTools.push({
+        name: "git_impact",
+        success: gitImpactRes.success,
+        summary: `Computed regression risk ${gitImpactRes.data?.regressionRisk?.risk || "LOW"} (blast radius: ${gitImpactRes.data?.regressionRisk?.blastRadiusScore || 0})`,
+        executionMs: gitImpactRes.executionMs,
+      });
+      if (gitImpactRes.data) {
+        phase3ImpactAnalysis = gitImpactRes.data;
+      }
+
       const target = activeFilePath || resolvedQuery.split(" ")[0] || "src/api/login.ts";
       const impactRes = await toolExecutor.execute("dependency_impact", { target });
       executedTools.push({
@@ -440,6 +584,24 @@ Provide clear headings, code snippets with before/after blocks, and actionable s
         totalTokens,
         estimatedCostUsd: costUsd,
       },
+
+      // Phase 3 Security Intelligence
+      securityFindings: phase3SecurityFindings,
+      securityHealth: phase3SecurityHealth,
+      dependencyFindings: phase3DependencyFindings,
+      secretsDetected: phase3SecretsDetected,
+      securityCoverage: phase3SecurityHealth ? `Files scanned: ${knowledgeGraph.getAllFilePaths().length}` : undefined,
+      securityMode: "PASSIVE_STATIC_AUDIT",
+
+      // Phase 3 Git / Diff Intelligence
+      gitStatus: phase3GitStatus,
+      diffSummary: phase3DiffSummary,
+      changedFiles: phase3ChangedFiles,
+      changedSymbols: phase3ChangedSymbols,
+      impactAnalysis: phase3ImpactAnalysis,
+      risk: phase3ImpactAnalysis?.regressionRisk?.risk,
+      riskConfidence: phase3ImpactAnalysis?.regressionRisk?.confidence,
+      securityImpact: phase3ImpactAnalysis?.securitySensitiveChanges,
     };
   }
 
@@ -564,6 +726,30 @@ Provide clear headings, code snippets with before/after blocks, and actionable s
           `**Recommended Fix**:\n\`\`\`typescript\n${f.recommendedFix}\n\`\`\`\n`
         );
       }).join("\n---\n\n");
+    }
+
+    if (
+      intent === "git" ||
+      q.includes("git status") ||
+      q.includes("git diff") ||
+      q.includes("what changed") ||
+      q.includes("what files changed") ||
+      q.includes("review changes")
+    ) {
+      const status = ws ? GitStatusManager.getStatusFromWorkspace(ws, (ws as any).memberFiles || []) : null;
+      const header =
+        `### 🌿 Git Working Tree & Diff Review: ${ws?.project.name ?? "HackSync Workspace"}\n\n` +
+        `**Branch**: \`${status?.branch || "main"}\` | **State**: \`${status?.state?.toUpperCase() || "CLEAN"}\`\n` +
+        `**Changed Files**: ${status?.totalChangedFiles || 0}\n\n` +
+        `#### 🛠️ Tools Executed:\n` +
+        toolCalls.map((t) => `- **\`${t.name}\`**: ${t.summary}`).join("\n") +
+        `\n\n---\n\n`;
+
+      if (status?.isClean) {
+        return header + `✅ **Working Tree Clean**: No uncommitted changes detected on branch \`${status.branch}\`. All files are in sync.`;
+      }
+
+      return header + (ws ? GitAnalyzer.reviewChanges(ws, (ws as any).memberFiles || []) : "Working tree has modifications.");
     }
 
     const header = `### 🔍 HackSync Project Intelligence & Evidence Report\n\n` +

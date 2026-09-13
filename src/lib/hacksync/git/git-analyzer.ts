@@ -1,5 +1,9 @@
 import type { Workspace, CodeNode, MemberFile } from "../types";
 import { diffLines, type DiffChunk } from "../merge-engine";
+import { GitDiffEngine, type GitDiffReport } from "./git-diff";
+import { ChangedSymbolsDetector, type ChangedSymbol } from "./changed-symbols";
+import { GitImpactEngine, type GitImpactReport } from "./git-impact";
+import type { ProjectKnowledgeGraph } from "../intelligence/knowledge-graph";
 
 export interface FileDiffSummary {
   filePath: string;
@@ -110,5 +114,45 @@ export class GitAnalyzer {
         .join("\n---\n\n");
 
     return report;
+  }
+
+  /**
+   * Phase 3: Generates a parsed GitDiffReport with structured hunks.
+   */
+  static getDiff(ws: Workspace, memberFiles: MemberFile[] = []): GitDiffReport {
+    return GitDiffEngine.getDiffFromWorkspace(ws, memberFiles);
+  }
+
+  /**
+   * Phase 3: Detects changed AST symbols from diffs.
+   */
+  static getChangedSymbols(
+    ws: Workspace,
+    memberFiles: MemberFile[] = [],
+    graph?: ProjectKnowledgeGraph,
+  ): ChangedSymbol[] {
+    const diffReport = GitDiffEngine.getDiffFromWorkspace(ws, memberFiles);
+    if (!graph) return [];
+    return ChangedSymbolsDetector.detectChangedSymbols(diffReport.files, graph);
+  }
+
+  /**
+   * Phase 3: Analyzes blast radius, affected routes, and security-sensitive changes.
+   */
+  static getImpact(
+    ws: Workspace,
+    memberFiles: MemberFile[] = [],
+    graph?: ProjectKnowledgeGraph,
+  ): GitImpactReport {
+    const diffReport = GitDiffEngine.getDiffFromWorkspace(ws, memberFiles);
+    if (!graph) {
+      throw new Error("ProjectKnowledgeGraph is required to compute Git impact.");
+    }
+    const changedSymbols = ChangedSymbolsDetector.detectChangedSymbols(diffReport.files, graph);
+    return GitImpactEngine.analyze({
+      fileDiffs: diffReport.files,
+      changedSymbols,
+      graph,
+    });
   }
 }

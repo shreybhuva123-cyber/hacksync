@@ -34,13 +34,16 @@ export class TaskClassifier {
       q.includes("auth bypass") ||
       q.includes("jwt") ||
       q.includes("secret") ||
+      q.includes("leaked") ||
+      q.includes("leak") ||
       q.includes("cve") ||
       q.includes("cwe") ||
       q.includes("sql safe") ||
       q.includes("safe from") ||
       q.includes("owasp") ||
       q.includes("xss") ||
-      q.includes("csrf")
+      q.includes("csrf") ||
+      q.includes("how secure")
     ) {
       return { taskType: "security", confidence: 0.95 };
     }
@@ -68,7 +71,12 @@ export class TaskClassifier {
       q.includes("recent changes") ||
       q.includes("latest changes") ||
       q.includes("commit") ||
-      q.includes("staged files")
+      q.includes("staged files") ||
+      q.includes("what changed") ||
+      q.includes("what files changed") ||
+      q.includes("functions were modified") ||
+      q.includes("uncommitted changes") ||
+      q.includes("working tree")
     ) {
       return { taskType: "git", confidence: 0.93 };
     }
@@ -176,8 +184,17 @@ export class TaskClassifier {
           taskType,
           goal: "Identify security vulnerabilities, injection hazards, credential leaks, and insecure dependencies.",
           requiredEvidence: ["ast_security_issues", "dependency_advisories", "credential_scans"],
-          allowedTools: ["analyze_security", "analyze_dependencies", "retrieve_code", "search_symbols"],
-          maxToolCalls: 4,
+          allowedTools: [
+            "security_scan",
+            "secret_scan",
+            "dependency_vulnerabilities",
+            "security_health",
+            "analyze_security",
+            "analyze_dependencies",
+            "retrieve_code",
+            "search_symbols",
+          ],
+          maxToolCalls: 6,
           requiresModel: true,
           confidence,
         };
@@ -237,8 +254,14 @@ export class TaskClassifier {
           taskType,
           goal: "Assess reverse dependencies and compute blast radius for code modifications.",
           requiredEvidence: ["direct_dependents", "transitive_dependents", "affected_routes"],
-          allowedTools: ["dependency_impact", "find_references", "search_symbols"],
-          maxToolCalls: 4,
+          allowedTools: [
+            "git_impact",
+            "dependency_impact",
+            "git_changed_symbols",
+            "find_references",
+            "search_symbols",
+          ],
+          maxToolCalls: 5,
           requiresModel: false,
           confidence,
         };
@@ -281,8 +304,8 @@ export class TaskClassifier {
           taskType,
           goal: "Review git changes, staged diffs, additions, and modifications.",
           requiredEvidence: ["changed_files", "diff_snippets"],
-          allowedTools: ["git_status", "git_diff", "retrieve_code"],
-          maxToolCalls: 3,
+          allowedTools: ["git_status", "git_diff", "git_changed_symbols", "git_impact", "retrieve_code"],
+          maxToolCalls: 5,
           requiresModel: true,
           confidence,
         };

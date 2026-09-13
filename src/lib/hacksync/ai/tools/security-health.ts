@@ -1,0 +1,34 @@
+/**
+ * Security Health AI Tool — HackSync Phase 3
+ * Returns heuristic project health score, penalty breakdown, and mandatory disclaimer.
+ * Strictly READ_ONLY.
+ */
+
+import type { ProjectKnowledgeGraph } from "../../intelligence/knowledge-graph";
+import type { Workspace } from "../../types";
+import { StaticAuditor } from "../../security/static-auditor";
+import { SecurityHealthCalculator } from "../../security/security-health";
+import { DependencyVulnerabilityScanner } from "../../security/dependency-vulnerability-scanner";
+import type { SecurityHealthBreakdown } from "../../security/finding-types";
+
+export class SecurityHealthTool {
+  static execute(
+    graph: ProjectKnowledgeGraph,
+    projectId = "default-project",
+    ws?: Workspace | null,
+  ): SecurityHealthBreakdown {
+    const report = StaticAuditor.runPassiveAudit({ graph, projectId, ws });
+
+    const pkgContent = graph.getFileContent("package.json");
+    let depResult = pkgContent
+      ? DependencyVulnerabilityScanner.scanManifest({ projectId, filePath: "package.json", content: pkgContent })
+      : undefined;
+
+    return SecurityHealthCalculator.calculate({
+      findings: report.findings,
+      dependencyFindings: depResult?.findings,
+      scannedFilesCount: report.coverage.scannedFilesCount,
+      dependencyStatus: depResult?.status,
+    });
+  }
+}

@@ -66,6 +66,24 @@ export interface AIResult {
     totalTokens: number;
     estimatedCostUsd: number;
   } | undefined;
+
+  // Phase 3 Security Intelligence
+  securityFindings?: import("../security/finding-types").SecurityFinding[] | undefined;
+  securityHealth?: import("../security/finding-types").SecurityHealthBreakdown | undefined;
+  dependencyFindings?: import("../security/dependency-vulnerability-scanner").DependencyAdvisoryFinding[] | undefined;
+  secretsDetected?: import("../security/finding-types").SecurityFinding[] | undefined;
+  securityCoverage?: string | undefined;
+  securityMode?: import("../security/finding-types").SecurityMode | undefined;
+
+  // Phase 3 Git / Diff Intelligence
+  gitStatus?: import("../git/git-status").GitStatusSummary | undefined;
+  diffSummary?: string | undefined;
+  changedFiles?: import("../git/diff-parser").ParsedFileDiff[] | undefined;
+  changedSymbols?: import("../git/changed-symbols").ChangedSymbol[] | undefined;
+  impactAnalysis?: import("../git/git-impact").GitImpactReport | undefined;
+  risk?: "low" | "medium" | "high" | "critical" | undefined;
+  riskConfidence?: "low" | "medium" | "high" | undefined;
+  securityImpact?: import("../git/git-impact").SecuritySensitiveChange[] | undefined;
 }
 
 export interface OrchestratorRequest {

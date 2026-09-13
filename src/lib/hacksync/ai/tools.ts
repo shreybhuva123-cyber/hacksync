@@ -19,6 +19,14 @@ import { FindApiRoutesTool } from "./tools/find-api-routes";
 import { FindDatabaseUsageTool } from "./tools/find-database-usage";
 import { ArchitectureSummaryTool } from "./tools/architecture-summary";
 import { DependencyImpactTool } from "./tools/dependency-impact";
+import { SecurityScanTool } from "./tools/security-scan";
+import { SecretScanTool } from "./tools/secret-scan";
+import { DependencyVulnerabilitiesTool } from "./tools/dependency-vulnerabilities";
+import { SecurityHealthTool } from "./tools/security-health";
+import { GitStatusTool } from "./tools/git-status";
+import { GitDiffTool } from "./tools/git-diff";
+import { GitChangedSymbolsTool } from "./tools/git-changed-symbols";
+import { GitImpactTool } from "./tools/git-impact";
 
 // ─── TOOL PERMISSION TIERS ───────────────────────────────────────────────────
 
@@ -35,6 +43,16 @@ export const TOOL_PERMISSIONS: Record<string, ToolPermissionTier> = {
   architecture_summary: "READ",
   dependency_impact: "READ",
 
+  // Core Phase 3 READ tools
+  security_scan: "READ",
+  secret_scan: "READ",
+  dependency_vulnerabilities: "READ",
+  security_health: "READ",
+  git_status: "READ",
+  git_diff: "READ",
+  git_changed_symbols: "READ",
+  git_impact: "READ",
+
   // Backward-compatible READ tools
   search_project: "READ",
   read_file: "READ",
@@ -42,8 +60,6 @@ export const TOOL_PERMISSIONS: Record<string, ToolPermissionTier> = {
   analyze_code: "READ",
   analyze_security: "READ",
   analyze_dependencies: "READ",
-  git_status: "READ",
-  git_diff: "READ",
   generate_fix_prompt: "READ",
 
   // WRITE tools (require explicit user approval)
@@ -205,6 +221,89 @@ export class AIToolExecutor {
 
         case "dependency_impact": {
           data = DependencyImpactTool.execute(this.graph, { target: String(args["target"] || "") });
+          break;
+        }
+
+        // ── Phase 3 Security & Git Tools ─────────────────────────────────────
+        case "security_scan": {
+          data = SecurityScanTool.execute(
+            this.graph,
+            { targetFile: args["targetFile"] ? String(args["targetFile"]) : undefined },
+            this.context.projectId,
+            this.ws,
+          );
+          break;
+        }
+
+        case "secret_scan": {
+          data = SecretScanTool.execute(
+            this.graph,
+            { targetFile: args["targetFile"] ? String(args["targetFile"]) : undefined },
+            this.context.projectId,
+          );
+          break;
+        }
+
+        case "dependency_vulnerabilities": {
+          data = DependencyVulnerabilitiesTool.execute(
+            this.graph,
+            { manifestFile: args["manifestFile"] ? String(args["manifestFile"]) : undefined },
+            this.context.projectId,
+          );
+          break;
+        }
+
+        case "security_health": {
+          data = SecurityHealthTool.execute(this.graph, this.context.projectId, this.ws);
+          break;
+        }
+
+        case "git_status": {
+          data = await GitStatusTool.execute(
+            { repoPath: args["repoPath"] ? String(args["repoPath"]) : undefined },
+            this.ws,
+            (this.ws as any)?.memberFiles || [],
+          );
+          break;
+        }
+
+        case "git_diff": {
+          data = await GitDiffTool.execute(
+            {
+              repoPath: args["repoPath"] ? String(args["repoPath"]) : undefined,
+              staged: args["staged"] ? Boolean(args["staged"]) : undefined,
+              commitRange: args["commitRange"] ? String(args["commitRange"]) : undefined,
+              fileFilter: args["fileFilter"] ? String(args["fileFilter"]) : undefined,
+            },
+            this.ws,
+            (this.ws as any)?.memberFiles || [],
+          );
+          break;
+        }
+
+        case "git_changed_symbols": {
+          data = await GitChangedSymbolsTool.execute(
+            this.graph,
+            {
+              repoPath: args["repoPath"] ? String(args["repoPath"]) : undefined,
+              staged: args["staged"] ? Boolean(args["staged"]) : undefined,
+            },
+            this.ws,
+            (this.ws as any)?.memberFiles || [],
+          );
+          break;
+        }
+
+        case "git_impact": {
+          data = await GitImpactTool.execute(
+            this.graph,
+            {
+              repoPath: args["repoPath"] ? String(args["repoPath"]) : undefined,
+              staged: args["staged"] ? Boolean(args["staged"]) : undefined,
+            },
+            this.ws,
+            (this.ws as any)?.memberFiles || [],
+          );
           break;
         }
 
