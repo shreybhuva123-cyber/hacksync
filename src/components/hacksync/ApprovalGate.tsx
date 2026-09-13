@@ -57,14 +57,19 @@ export function ApprovalGate({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="approval-gate-title"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm"
+    >
       <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-[10px] border border-border bg-surface shadow-2xl">
         {/* Modal Header */}
         <header className="flex items-center justify-between border-b border-border px-5 py-3.5 bg-surface-raised">
           <div className="flex items-center gap-2.5">
             <Shield className="size-4 text-primary" />
             <div>
-              <h2 className="text-sm font-semibold text-foreground">
+              <h2 id="approval-gate-title" className="text-sm font-semibold text-foreground">
                 Human-in-the-Loop Patch Approval Gate
               </h2>
               <p className="text-[11px] text-muted-foreground mono">
@@ -75,7 +80,8 @@ export function ApprovalGate({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-[6px] p-1 text-muted-foreground hover:bg-surface hover:text-foreground"
+            aria-label="Close dialog"
+            className="rounded-[6px] p-1 text-muted-foreground hover:bg-surface hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           >
             ✕
           </button>

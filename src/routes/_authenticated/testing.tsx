@@ -37,7 +37,7 @@ export const Route = createFileRoute("/_authenticated/testing")({
       { title: "Testing & Verification Center — HackSync" },
       {
         name: "description",
-        content: "Targeted test planning, sandbox test execution, and closed-loop fix verification.",
+        content: "Targeted test planning, isolated test workspace execution, and closed-loop fix verification.",
       },
     ],
   }),
@@ -201,7 +201,7 @@ function TestingBody({ ws }: { ws: Workspace }) {
       <PageHeader
         eyebrow="Testing Intelligence"
         title="Testing Center & Fix-Verify Pipeline"
-        description="Targeted test planning, sandboxed unit/integration execution, and closed-loop fix verification."
+        description="Targeted test planning, isolated test workspace execution, and closed-loop fix verification."
         actions={
           <div className="flex items-center gap-2">
             <button
@@ -243,7 +243,7 @@ function TestingBody({ ws }: { ws: Workspace }) {
         <Metric
           label="Suite Execution"
           value={`${summary.totalDuration}ms`}
-          hint="Parallel sandbox runner"
+          hint="Isolated test workspace"
           tone="neutral"
           icon={<Terminal className="size-4 text-muted-foreground" />}
         />
@@ -395,7 +395,7 @@ function TestingBody({ ws }: { ws: Workspace }) {
                 </div>
 
                 <div>
-                  <h3 className="text-xs font-semibold text-foreground">Sandbox Output Log</h3>
+                  <h3 className="text-xs font-semibold text-foreground">Execution Output Log (Isolated Workspace)</h3>
                   <div className="mt-2 rounded-[6px] border border-border bg-background p-3">
                     <pre className="mono text-[11px] text-foreground/85 leading-relaxed overflow-x-auto whitespace-pre-wrap">
                       {selectedCase.log ?? "No execution logs recorded."}

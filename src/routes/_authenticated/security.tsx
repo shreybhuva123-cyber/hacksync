@@ -165,7 +165,7 @@ function SecurityBody({ ws }: { ws: Workspace }) {
   const generateReport = () => {
     const report = `# Cyber Security & Vulnerability Audit Report
 **Project:** ${ws.project.name}
-**Score:** ${audit.score}/100 (Grade ${audit.grade})
+**Score:** ${audit.score}/100 (Grade ${audit.grade}) — *Internal heuristic indicator, not an industry-standard security certification or official audit*
 **Scanned At:** ${new Date().toLocaleString()}
 **Targets Scanned:** ${ws.codeNodes.length} Code Files, ${ws.contracts.length} API Contracts, ${ws.tables.length} Database Tables
 
@@ -247,6 +247,9 @@ ${audit.vulnerabilities
               </span>
             </div>
             <p className="text-xs text-muted-foreground mt-0.5">Security Posture</p>
+            <p className="text-[10px] text-muted-foreground/80 leading-tight mt-0.5">
+              Internal heuristic indicator · not an official certification
+            </p>
           </div>
         </Panel>
 

@@ -135,6 +135,10 @@ function DashboardBody({ ws }: { ws: Workspace }) {
                 </div>
               ))}
             </div>
+            <div className="w-full rounded-[6px] border border-border/80 bg-surface-raised/60 p-2.5 text-[11px] text-muted-foreground leading-relaxed">
+              <span className="font-semibold text-foreground">Notice: </span>
+              Internal heuristic indicator based on static analysis & AST readiness, not an industry-standard security certification or official audit.
+            </div>
           </Panel>
 
           {/* Repository Architecture Summary */}

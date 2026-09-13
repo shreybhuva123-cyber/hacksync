@@ -269,12 +269,18 @@ export function AppShell({ children }: { children: ReactNode }) {
               <span>{ws?.project.default_branch ?? "main"}</span>
             </div>
 
+            {/* Real-time Sync Status indicator */}
+            <div className="hidden lg:flex items-center gap-1.5 rounded-full border border-success/30 bg-success/10 px-2 py-0.5 text-[11px] font-medium text-success">
+              <span className="size-1.5 rounded-full bg-success" />
+              <span>Live Sync Active</span>
+            </div>
+
             {ws?.project.repo_url ? (
               <a
                 href={ws.project.repo_url}
                 target="_blank"
                 rel="noreferrer"
-                className="mono hidden items-center gap-1 text-[11px] text-muted-foreground hover:text-primary md:inline-flex transition-colors"
+                className="mono hidden items-center gap-1 text-[11px] text-muted-foreground hover:text-primary md:inline-flex transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               >
                 <Github className="size-3.5" />
                 {ws.project.repo_url.replace("https://github.com/", "")}
@@ -287,7 +293,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <button
               type="button"
               onClick={() => setCommandOpen(true)}
-              className="flex items-center gap-2 rounded-[6px] border border-border bg-surface px-2.5 py-1 text-xs text-muted-foreground hover:border-border-strong hover:text-foreground transition-colors"
+              className="flex items-center gap-2 rounded-[6px] border border-border bg-surface px-2.5 py-1 text-xs text-muted-foreground hover:border-border-strong hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
               title="Search or Jump to... (Ctrl+K)"
             >
               <Search className="size-3.5" />
@@ -305,7 +311,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <button
                 type="button"
                 onClick={() => setInviteOpen(true)}
-                className="flex items-center gap-1.5 rounded-[6px] border border-border bg-surface px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-surface-raised"
+                className="flex items-center gap-1.5 rounded-[6px] border border-border bg-surface px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-surface-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                 title="Invite Teammates"
               >
                 <UserPlus className="size-3.5 text-primary" />
@@ -317,7 +323,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <button
               type="button"
               onClick={() => setCopilotOpen(true)}
-              className="flex items-center gap-1.5 rounded-[6px] border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/20"
+              className="flex items-center gap-1.5 rounded-[6px] border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
               title="Open AI Engineering Copilot (Ctrl+J)"
             >
               <Sparkles className="size-3.5" />

@@ -44,7 +44,7 @@ Routing is organized around an authenticated layout shell (`_authenticated`) tha
 | `/_authenticated/dashboard` | `src/routes/_authenticated/dashboard.tsx` | Repository Health, AST Summary, Security Overview, Branch Drift |
 | `/_authenticated/code` | `src/routes/_authenticated/code.tsx` | AST Knowledge Graph, Symbol Dependency Explorer, Code Editor |
 | `/_authenticated/security` | `src/routes/_authenticated/security.tsx` | SAST Vulnerability Center, OWASP/CWE Audit, Remediation Proposals |
-| `/_authenticated/testing` | `src/routes/_authenticated/testing.tsx` | Targeted Test Planner, Sandbox Runner, Symbol Coverage Mapping |
+| `/_authenticated/testing` | `src/routes/_authenticated/testing.tsx` | Targeted Test Planner, Isolated Test Workspace, Symbol Coverage Mapping |
 | `/_authenticated/evaluation`| `src/routes/_authenticated/evaluation.tsx` | Multi-Model Benchmarking (BM-1 to BM-7), Regression Radar, Observability |
 | `/_authenticated/git` | `src/routes/_authenticated/git.tsx` | Branch Divergence, AST Merge Conflicts, Blast Radius Analyzer |
 | `/_authenticated/settings`| `src/routes/_authenticated/settings.tsx` | Project Settings, Gateway Configuration, API Keys, Permissions |

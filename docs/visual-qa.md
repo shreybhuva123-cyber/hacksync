@@ -55,7 +55,7 @@ A comprehensive visual and stylistic audit was performed across all HackSync vie
 | **Overview (`/dashboard`)** | 5-factor repository health, AST summary, active findings, branch status | Pass — Clean, dense, zero marketing fluff |
 | **Code Intelligence (`/code`)** | AST knowledge graph, dependency tree, syntax editor, symbol inspector | Pass — Monospace fidelity, clear node hierarchy |
 | **Security Center (`/security`)** | SAST audit, OWASP/CWE breakdown, "Propose Fix & Review Diff" button | Pass — Evidence-backed findings with ApprovalGate |
-| **Testing Center (`/testing`)** | Targeted test planner, sandbox runner, symbol coverage mapper | Pass — Deterministic suite runner with duration metrics |
+| **Testing Center (`/testing`)** | Targeted test planner, isolated test workspace, symbol coverage mapper | Pass — Deterministic suite runner with duration metrics |
 | **Evaluation Center (`/evaluation`)** | Multi-model matrix, BM-1 to BM-7 suites, dual-delta regression radar | Pass — Objective benchmarks with verifiable hashes |
 | **Git Intelligence (`/git`)** | Branch divergence, merge conflict radar, blast radius impact graph | Pass — Clear ahead/behind counts, AST impact nodes |
 | **Command Palette (`Ctrl + K`)** | Global quick-jump search dialog across routes, files, and actions | Pass — Accessible, responsive, fast fuzzy search |
