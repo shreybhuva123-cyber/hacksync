@@ -35,8 +35,11 @@ jobs:
       - name: TypeScript Strict Typecheck
         run: bunx tsc --noEmit
 
-      - name: Run Automated Test Suite
-        run: bun test
+      - name: Run Core Service Tests
+        run: bun test src/lib/services/__tests__/
+
+      - name: Run HackSync Intelligence & Security Tests
+        run: bun test src/tests/ src/lib/hacksync/
 
       - name: Dependency Security Audit
         run: bun pm ls --all 2>&1 | head -100
