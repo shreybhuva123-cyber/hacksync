@@ -11,7 +11,8 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "test": "bun test",
-    "test:e2e": "bun test-e2e.ts"
+    "test:e2e": "bun test-e2e.ts",
+    "validate": "bun scripts/validate.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

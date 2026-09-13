@@ -636,6 +636,10 @@ export class ApprovalGate {
     });
   }
 
+  static listPending(projectId: string): PendingApprovalRequest[] {
+    return this.getPendingForProject(projectId);
+  }
+
   static getApproval(approvalId: string): PendingApprovalRequest | undefined {
     return this.pendingApprovals.get(approvalId);
   }

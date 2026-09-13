@@ -10,8 +10,9 @@ import { getServerEnv, isProviderConfigured } from "../config/server-env";
 import { SecretRedactor } from "../hacksync/security/secret-redactor";
 import { ExternalServiceError, logger } from "../errors";
 import { OllamaProvider } from "./providers/ollama-provider";
+import { CircuitBreakerRegistry } from "./circuit-breaker";
 
-export { OllamaProvider };
+export { OllamaProvider, CircuitBreakerRegistry };
 
 /**
  * Executes an async operation with exponential backoff retry for transient network errors.
@@ -401,10 +402,20 @@ export class ModelRouter {
     ];
 
     for (const provider of providersToTry) {
+      const breaker = CircuitBreakerRegistry.getBreaker(provider.name);
+      if (breaker.isOpen()) {
+        logger.warn(
+          `[ModelRouter] Circuit breaker for '${provider.name}' is OPEN. Skipping upstream call to next fallback.`,
+        );
+        continue;
+      }
+
       try {
         const response = await provider.chat(messages, options);
+        breaker.recordSuccess();
         return { response, usedModel: response.model };
       } catch (err: any) {
+        breaker.recordFailure();
         logger.warn(`[ModelRouter] Provider '${provider.name}' failed. Trying next provider in fallback chain...`, {
           error: err.message,
         });
