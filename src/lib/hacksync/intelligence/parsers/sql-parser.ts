@@ -33,13 +33,26 @@ export class SqlParser implements CodeParser {
       const hasPrimaryKey = /PRIMARY\s+KEY/i.test(tableBody);
       const hasPlaintextPassword = /(?:password|passwd|pwd)\s+(?:TEXT|VARCHAR\([0-9]+\))\b/i.test(tableBody);
 
+      // Extract referenced tables from FOREIGN KEY ... REFERENCES other_table(...)
+      const referencedTables: string[] = [];
+      const fkRegex = /REFERENCES\s+["']?([a-zA-Z0-9_]+)["']?\s*\(/gi;
+      let fkMatch: RegExpExecArray | null;
+      while ((fkMatch = fkRegex.exec(tableBody)) !== null) {
+        const refTable = fkMatch[1];
+        if (refTable && !referencedTables.includes(refTable) && refTable !== tableName) {
+          referencedTables.push(refTable);
+        }
+      }
+
       symbols.push({
+        symbolId: `${filePath}#${tableName}:${lineStart}`,
+        filePath,
         name: tableName,
         kind: "table",
         lineStart,
         lineEnd,
         isExported: true,
-        calls: [],
+        calls: referencedTables,
       });
 
       dbCalls.push({
@@ -92,3 +105,4 @@ export class SqlParser implements CodeParser {
     };
   }
 }
+

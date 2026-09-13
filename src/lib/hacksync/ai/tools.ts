@@ -141,17 +141,21 @@ export class AIToolExecutor {
 
         case "search_symbols": {
           const name = String(args["name"] || "");
-          data = this.graph.findSymbol(name);
+          const exact = this.graph.findSymbol(name);
+          const searched = this.graph.searchSymbols(name);
+          data = exact.length > 0 ? exact : searched;
           break;
         }
 
         case "find_references": {
           const symbolOrPath = String(args["target"] || "");
           const dependents = this.graph.findDependents(symbolOrPath);
+          const transitiveDependents = this.graph.getTransitiveDependents(symbolOrPath);
           data = {
             target: symbolOrPath,
             dependents,
-            message: `Found ${dependents.length} file(s) that depend on '${symbolOrPath}'`,
+            transitiveDependents,
+            message: `Found ${dependents.length} direct and ${transitiveDependents.length} transitive file(s) that depend on '${symbolOrPath}'`,
           };
           break;
         }
@@ -195,6 +199,8 @@ export class AIToolExecutor {
           data = {
             metrics: this.graph.getMetrics(),
             structure: this.graph.getStructureTree(),
+            architectureProfile: this.graph.getArchitectureProfile(),
+            cycles: this.graph.getCycles(),
           };
           break;
         }

@@ -1,16 +1,44 @@
 /**
  * Standard Code Parser Contract for HackSync Project Intelligence
+ * Enhanced for Phase 1: Real AST, Symbol Hierarchy, Exact Line Ranges & Diagnostics
  */
 
+export type SymbolKind =
+  | "function"
+  | "class"
+  | "method"
+  | "component"
+  | "hook"
+  | "route"
+  | "variable"
+  | "type"
+  | "interface"
+  | "enum"
+  | "table";
+
 export interface ParsedSymbol {
+  symbolId?: string | undefined; // Unique identifier e.g. `${filePath}#${name}:${lineStart}`
+  projectId?: string | undefined;
+  filePath?: string | undefined;
   name: string;
-  kind: "function" | "class" | "component" | "route" | "variable" | "type" | "table";
+  kind: SymbolKind;
   lineStart: number;
   lineEnd: number;
   isAsync?: boolean | undefined;
   isExported: boolean;
   params?: string[] | undefined;
+  returnType?: string | undefined;
+  signature?: string | undefined;
+  parentSymbol?: string | undefined;
+  decorators?: string[] | undefined;
   calls?: string[] | undefined; // Other symbols called inside this symbol
+}
+
+export interface ImportedSymbolSpec {
+  name: string;
+  alias?: string | undefined;
+  isDefault?: boolean | undefined;
+  isNamespace?: boolean | undefined;
 }
 
 export interface ParsedImport {
@@ -18,12 +46,18 @@ export interface ParsedImport {
   specifiers: string[];
   isDefault: boolean;
   line: number;
+  isTypeOnly?: boolean | undefined;
+  resolvedPath?: string | null | undefined;
+  unresolved?: boolean | undefined;
+  importedSymbols?: ImportedSymbolSpec[] | undefined;
 }
 
 export interface ParsedExport {
   name: string;
-  kind: "function" | "class" | "variable" | "type" | "default";
+  kind: "function" | "class" | "variable" | "type" | "interface" | "enum" | "default";
   line: number;
+  isTypeOnly?: boolean | undefined;
+  reExportFrom?: string | undefined;
 }
 
 export interface ParsedApiRoute {
@@ -62,6 +96,19 @@ export interface CodeIssueCandidate {
   suggestedFix: string;
 }
 
+export type ArchitectureRole =
+  | "component"
+  | "route"
+  | "service"
+  | "repository"
+  | "database"
+  | "auth"
+  | "middleware"
+  | "config"
+  | "test"
+  | "util"
+  | "unknown";
+
 export interface ParsedAstSummary {
   filePath: string;
   language: string;
@@ -73,6 +120,8 @@ export interface ParsedAstSummary {
   dbCalls: ParsedDbCall[];
   issues: CodeIssueCandidate[];
   loc: number;
+  contentHash?: string | undefined;
+  architectureRole?: ArchitectureRole | undefined;
 }
 
 export interface CodeParser {

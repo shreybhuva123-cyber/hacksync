@@ -29,7 +29,7 @@ export class ProjectIndexManager {
       return existing.graph;
     }
 
-    const newGraph = new ProjectKnowledgeGraph();
+    const newGraph = new ProjectKnowledgeGraph(cleanId);
     this.graphs.set(cleanId, { graph: newGraph, lastAccessed: Date.now() });
     return newGraph;
   }

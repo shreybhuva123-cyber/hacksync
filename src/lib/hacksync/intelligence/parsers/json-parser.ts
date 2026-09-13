@@ -2,6 +2,7 @@ import type {
   CodeParser,
   ParsedAstSummary,
   ParsedExport,
+  ParsedSymbol,
   CodeIssueCandidate,
 } from "./parser-interface";
 
@@ -13,40 +14,56 @@ export class JsonParser implements CodeParser {
   parse(filePath: string, content: string): ParsedAstSummary {
     const lines = content.split("\n");
     const exports: ParsedExport[] = [];
+    const symbols: ParsedSymbol[] = [];
     const issues: CodeIssueCandidate[] = [];
 
     try {
       const parsed = JSON.parse(content);
 
-      if (filePath.endsWith("package.json") && typeof parsed === "object" && parsed !== null) {
-        // Collect dependencies as exports / symbols
-        const allDeps = {
-          ...(parsed.dependencies || {}),
-          ...(parsed.devDependencies || {}),
-        };
-
-        Object.entries(allDeps).forEach(([depName, version]) => {
-          exports.push({
-            name: `${depName}@${String(version)}`,
+      if (typeof parsed === "object" && parsed !== null) {
+        // Index top-level config keys
+        Object.keys(parsed).forEach((key) => {
+          symbols.push({
+            symbolId: `${filePath}#${key}:1`,
+            filePath,
+            name: key,
             kind: "variable",
-            line: 1,
+            lineStart: 1,
+            lineEnd: 1,
+            isExported: true,
           });
-
-          // Check for wildcard unpinned dependencies
-          if (version === "*" || version === "latest") {
-            issues.push({
-              id: `issue-unpinned-dep-${depName}`,
-              line: 1,
-              type: "missing_auth",
-              severity: "medium",
-              confidence: 90,
-              title: `Unpinned Dependency (${depName}) - Version: ${String(version)}`,
-              description: `Dependency '${depName}' is configured with unpinned wildcard '${String(version)}', creating risks of unexpected upstream breaking changes or compromised supply chain updates.`,
-              snippet: `"${depName}": "${String(version)}"`,
-              suggestedFix: `Pin to an exact or semver-caret version (e.g. "^1.0.0")`,
-            });
-          }
         });
+
+        if (filePath.endsWith("package.json")) {
+          // Collect dependencies as exports / symbols
+          const allDeps = {
+            ...(parsed.dependencies || {}),
+            ...(parsed.devDependencies || {}),
+          };
+
+          Object.entries(allDeps).forEach(([depName, version]) => {
+            exports.push({
+              name: `${depName}@${String(version)}`,
+              kind: "variable",
+              line: 1,
+            });
+
+            // Check for wildcard unpinned dependencies
+            if (version === "*" || version === "latest") {
+              issues.push({
+                id: `issue-unpinned-dep-${depName}`,
+                line: 1,
+                type: "missing_auth",
+                severity: "medium",
+                confidence: 90,
+                title: `Unpinned Dependency (${depName}) - Version: ${String(version)}`,
+                description: `Dependency '${depName}' is configured with unpinned wildcard '${String(version)}', creating risks of unexpected upstream breaking changes or compromised supply chain updates.`,
+                snippet: `"${depName}": "${String(version)}"`,
+                suggestedFix: `Pin to an exact or semver-caret version (e.g. "^1.0.0")`,
+              });
+            }
+          });
+        }
       }
     } catch {
       issues.push({
@@ -67,7 +84,7 @@ export class JsonParser implements CodeParser {
       language: "json",
       imports: [],
       exports,
-      symbols: [],
+      symbols,
       apiRoutes: [],
       dbCalls: [],
       issues,
@@ -75,3 +92,4 @@ export class JsonParser implements CodeParser {
     };
   }
 }
+

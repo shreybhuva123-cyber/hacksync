@@ -8,6 +8,8 @@ import { AIObservability } from "./observability";
 import { AIToolExecutor } from "./tools";
 import { ConversationMemory } from "./memory";
 import { ModelRouter } from "./model-router";
+import { HybridRetrievalEngine, type RetrievalResult } from "../intelligence/retrieval-engine";
+import { ProjectContextBuilder, type BuiltContext } from "../intelligence/context-builder";
 import type { AIIntentType, AIFinding, ToolCallResult } from "./types";
 import type { LLMMessage } from "./provider-interface";
 
@@ -227,23 +229,25 @@ export class AIOrchestrator {
       ConversationMemory.setLastFixPlan(top.recommendedFix, undefined, userId);
     }
 
-    // 8. Model Routing & Synthesis
+    // 8. Hybrid Multi-Signal Retrieval & Project Context Building
+    const retrieval = HybridRetrievalEngine.retrieve({
+      query: resolvedQuery,
+      graph: knowledgeGraph,
+      activeFilePath,
+      limit: 5,
+    });
+
+    const archProfile = knowledgeGraph.getArchitectureProfile();
+    const builtContext = ProjectContextBuilder.build(retrieval, collectedFindings, archProfile, {
+      includeArchitectureProfile: true,
+    });
+
+    // 9. Model Routing & Synthesis
     const { provider, modelName } = ModelRouter.getBestProvider(preference, intent);
 
     let outputText = "";
 
     if (provider && provider.isAvailable()) {
-      // Prompt LLM with concrete AST evidence
-      const evidenceSummary = collectedFindings.length > 0
-        ? `VERIFIED CODEBASE EVIDENCE:\n` +
-          collectedFindings
-            .map(
-              (f) =>
-                `[${f.severity}] ${f.title} at ${f.primaryLocation.filePath}:${f.primaryLocation.line}\nSnippet: ${f.evidenceItems[0]?.snippet || ""}\nExplanation: ${f.explanation}`,
-            )
-            .join("\n\n")
-        : `No direct AST code issues detected for query.`;
-
       const systemPrompt = `You are HackSync AI, an elite Staff Software Engineer and Cyber Security Specialist.
 Analyze the user request using the provided verified codebase evidence.
 Strictly adhere to the evidence provided. Do not hallucinate files or lines not present in the project.
@@ -257,7 +261,7 @@ Provide clear headings, code snippets with before/after blocks, and actionable s
         })),
         {
           role: "user",
-          content: `${resolvedQuery}\n\n${evidenceSummary}`,
+          content: `${resolvedQuery}\n\n${builtContext.formattedContext}`,
         },
       ];
 
@@ -265,11 +269,27 @@ Provide clear headings, code snippets with before/after blocks, and actionable s
         const response = await provider.chat(messages);
         outputText = response.text;
       } catch {
-        outputText = this.formatDeterministicReport(resolvedQuery, intent, collectedFindings, executedTools, params.ws);
+        outputText = this.formatDeterministicReport(
+          resolvedQuery,
+          intent,
+          collectedFindings,
+          executedTools,
+          params.ws,
+          retrieval,
+          builtContext,
+        );
       }
     } else {
       // Deterministic Static Analysis Output (Honest, 0 Hallucinations)
-      outputText = this.formatDeterministicReport(resolvedQuery, intent, collectedFindings, executedTools, params.ws);
+      outputText = this.formatDeterministicReport(
+        resolvedQuery,
+        intent,
+        collectedFindings,
+        executedTools,
+        params.ws,
+        retrieval,
+        builtContext,
+      );
     }
 
     // 9. Record Observability Metrics
@@ -321,6 +341,8 @@ Provide clear headings, code snippets with before/after blocks, and actionable s
     findings: AIFinding[],
     toolCalls: { name: string; summary: string }[],
     ws?: Workspace | null | undefined,
+    retrieval?: RetrievalResult | undefined,
+    builtContext?: BuiltContext | undefined,
   ): string {
     const q = query.toLowerCase();
 
@@ -400,6 +422,24 @@ Provide clear headings, code snippets with before/after blocks, and actionable s
       `\n\n---\n\n`;
 
     if (findings.length === 0) {
+      if (retrieval && retrieval.hits.length > 0) {
+        const codeHits = retrieval.hits
+          .map((h) => {
+            const syms = h.matchedSymbols.length > 0 ? ` (Symbols: ${h.matchedSymbols.map((s) => s.name).join(", ")})` : "";
+            const range = h.lineRange ? ` [Lines ${h.lineRange.start}-${h.lineRange.end}]` : "";
+            return `#### 📄 File: \`${h.filePath}\`${range}${syms}\nRelevance Score: ${h.score} | Reasons: ${h.matchReasons.join(", ")}\n\`\`\`typescript\n${h.snippet || ""}\n\`\`\``;
+          })
+          .join("\n\n");
+        return header + `### 📑 Retrieved Code Context:\n\n` + codeHits;
+      }
+
+      if (builtContext && !builtContext.hasSufficientEvidence) {
+        return (
+          header +
+          `⚠️ [Project Context]: Insufficient project evidence found for query '${query}'. No matching symbols or files located in the project index.`
+        );
+      }
+
       return (
         header +
         `✅ **No Defects Detected**: AST parsing and security pattern analysis identified 0 critical code faults or injection vectors matching this query.`
