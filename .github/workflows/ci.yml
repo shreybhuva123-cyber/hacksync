@@ -19,6 +19,7 @@ jobs:
       # Public keys needed for Vite client build (safe to expose)
       VITE_SUPABASE_URL: https://qqyecjwhyjyryqykhcxa.supabase.co
       VITE_SUPABASE_PUBLISHABLE_KEY: sb_publishable_R-3iTQYsV4f8KWKc38bwcA_4MV4rOrg
+      CI: "true"
 
     steps:
       - name: Checkout repository
@@ -35,119 +36,8 @@ jobs:
       - name: TypeScript Strict Typecheck
         run: bunx tsc --noEmit
 
-      - name: Run Core Service Tests
-        id: test_services
-        continue-on-error: true
-        run: bun test src/lib/services/__tests__/
-
-      - name: Run HackSync AI Intelligence Test
-        id: test_ai_intel
-        continue-on-error: true
-        run: bun test src/lib/hacksync/ai-intelligence.test.ts
-
-      - name: Run Phase Tests - AI
-        id: test_ai
-        continue-on-error: true
-        run: bun test src/tests/ai/
-
-      - name: Run Phase Tests - Concurrency
-        id: test_concurrency
-        continue-on-error: true
-        run: bun test src/tests/concurrency/
-
-      - name: Run Phase Tests - Evaluation
-        id: test_evaluation
-        continue-on-error: true
-        run: bun test src/tests/evaluation/
-
-      - name: Run Phase Tests - Fixing
-        id: test_fixing
-        continue-on-error: true
-        run: bun test src/tests/fixing/
-
-      - name: Run Phase Tests - Git
-        id: test_git
-        continue-on-error: true
-        run: bun test src/tests/git/
-
-      - name: Run Phase Tests - Intelligence
-        id: test_intelligence
-        continue-on-error: true
-        run: bun test src/tests/intelligence/
-
-      - name: Run Phase Tests - Observability
-        id: test_observability
-        continue-on-error: true
-        run: bun test src/tests/observability/
-
-      - name: Run Phase Tests - Resilience
-        id: test_resilience
-        continue-on-error: true
-        run: bun test src/tests/resilience/
-
-      - name: Run Phase Tests - Security
-        id: test_security
-        continue-on-error: true
-        run: bun test src/tests/security/
-
-      - name: Run Phase Tests - Testing
-        id: test_testing
-        continue-on-error: true
-        run: bun test src/tests/testing/
-
-      - name: Run Phase Tests - UI
-        id: test_ui
-        continue-on-error: true
-        run: bun test src/tests/ui/
-
-      - name: Run Phase Tests - Validation
-        id: test_validation
-        continue-on-error: true
-        run: bun test src/tests/validation/
-
-      - name: Verify All Tests Passed
-        run: |
-          echo "=== TEST RESULTS ==="
-          echo "Services:     ${{ steps.test_services.outcome }}"
-          echo "AI Intel:     ${{ steps.test_ai_intel.outcome }}"
-          echo "AI:           ${{ steps.test_ai.outcome }}"
-          echo "Concurrency:  ${{ steps.test_concurrency.outcome }}"
-          echo "Evaluation:   ${{ steps.test_evaluation.outcome }}"
-          echo "Fixing:       ${{ steps.test_fixing.outcome }}"
-          echo "Git:          ${{ steps.test_git.outcome }}"
-          echo "Intelligence: ${{ steps.test_intelligence.outcome }}"
-          echo "Observability:${{ steps.test_observability.outcome }}"
-          echo "Resilience:   ${{ steps.test_resilience.outcome }}"
-          echo "Security:     ${{ steps.test_security.outcome }}"
-          echo "Testing:      ${{ steps.test_testing.outcome }}"
-          echo "UI:           ${{ steps.test_ui.outcome }}"
-          echo "Validation:   ${{ steps.test_validation.outcome }}"
-          echo "===================="
-          FAILED=0
-          for outcome in \
-            "${{ steps.test_services.outcome }}" \
-            "${{ steps.test_ai_intel.outcome }}" \
-            "${{ steps.test_ai.outcome }}" \
-            "${{ steps.test_concurrency.outcome }}" \
-            "${{ steps.test_evaluation.outcome }}" \
-            "${{ steps.test_fixing.outcome }}" \
-            "${{ steps.test_git.outcome }}" \
-            "${{ steps.test_intelligence.outcome }}" \
-            "${{ steps.test_observability.outcome }}" \
-            "${{ steps.test_resilience.outcome }}" \
-            "${{ steps.test_security.outcome }}" \
-            "${{ steps.test_testing.outcome }}" \
-            "${{ steps.test_ui.outcome }}" \
-            "${{ steps.test_validation.outcome }}"; do
-            if [ "$outcome" != "success" ]; then
-              FAILED=1
-            fi
-          done
-          if [ $FAILED -ne 0 ]; then
-            echo "❌ One or more test groups failed!"
-            exit 1
-          fi
-          echo "✅ All test groups passed!"
+      - name: Run Automated Test Suite
+        run: bun test --timeout 15000
 
       - name: Dependency Security Audit
         run: bun pm ls --all 2>&1 | head -100

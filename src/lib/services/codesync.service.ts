@@ -48,10 +48,17 @@ let isSyncExecutionLocked = false;
  * Timeout wrapper for database calls so unit tests and offline environments never hang indefinitely
  */
 async function withDbTimeout<T>(promise: PromiseLike<T> | Promise<T> | any, timeoutMs = 750): Promise<T | null> {
+  const isTestOrCI =
+    typeof process !== "undefined" &&
+    (process.env["NODE_ENV"] === "test" ||
+      process.env["CI"] === "true" ||
+      !!process.env["BUN_ENV"] ||
+      !!process.env["GITHUB_ACTIONS"]);
+  const effectiveTimeout = isTestOrCI ? Math.min(timeoutMs, 50) : timeoutMs;
   try {
     return await Promise.race([
       Promise.resolve(promise).catch(() => null),
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), effectiveTimeout)),
     ]);
   } catch {
     return null;

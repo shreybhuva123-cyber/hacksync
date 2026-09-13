@@ -100,10 +100,35 @@ export class GitSafety {
 
     // If requested path is supplied, it must resolve within canonicalRoot and realRoot
     if (requestedPath && requestedPath.trim() !== "") {
-      const canonicalRequested = normalize(resolve(requestedPath));
-      
-      // 1. Textual path prefix check
-      if (!canonicalRequested.toLowerCase().startsWith(canonicalRoot.toLowerCase())) {
+      const trimmed = requestedPath.trim();
+
+      // Cross-platform alien absolute path detection:
+      // A Windows drive path (e.g. C:\...) on POSIX is outside POSIX root
+      if (process.platform !== "win32" && /^[a-zA-Z]:[\\/]/.test(trimmed)) {
+        throw new AuthorizationError(
+          `[GitSafety] Path traversal / cross-project escape prevented. Target '${requestedPath}' is outside authorized root '${authorizedProjectRoot}'.`,
+        );
+      }
+
+      // A POSIX root path (e.g. /etc/...) on Windows is outside Windows root
+      if (process.platform === "win32" && (trimmed.startsWith("/") || trimmed.startsWith("\\\\"))) {
+        throw new AuthorizationError(
+          `[GitSafety] Path traversal / cross-project escape prevented. Target '${requestedPath}' is outside authorized root '${authorizedProjectRoot}'.`,
+        );
+      }
+
+      const canonicalRequested = isAbsolute(trimmed)
+        ? normalize(resolve(trimmed))
+        : normalize(resolve(canonicalRoot, trimmed));
+
+      const sep = process.platform === "win32" ? "\\" : "/";
+      const rootWithSep = canonicalRoot.endsWith(sep) ? canonicalRoot : canonicalRoot + sep;
+
+      // 1. Textual path prefix check (exact match or proper subpath)
+      const isExactMatch = canonicalRequested.toLowerCase() === canonicalRoot.toLowerCase();
+      const isSubpath = canonicalRequested.toLowerCase().startsWith(rootWithSep.toLowerCase());
+
+      if (!isExactMatch && !isSubpath) {
         throw new AuthorizationError(
           `[GitSafety] Path traversal / cross-project escape prevented. Target '${requestedPath}' is outside authorized root '${authorizedProjectRoot}'.`,
         );
@@ -119,7 +144,11 @@ export class GitSafety {
         }
       }
 
-      if (!realRequested.toLowerCase().startsWith(realRoot.toLowerCase())) {
+      const realRootWithSep = realRoot.endsWith(sep) ? realRoot : realRoot + sep;
+      const isRealExactMatch = realRequested.toLowerCase() === realRoot.toLowerCase();
+      const isRealSubpath = realRequested.toLowerCase().startsWith(realRootWithSep.toLowerCase());
+
+      if (!isRealExactMatch && !isRealSubpath) {
         throw new AuthorizationError(
           `[GitSafety] Symlink traversal escape prevented. Real target '${realRequested}' resolves outside authorized root '${realRoot}'.`,
         );

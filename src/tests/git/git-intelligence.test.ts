@@ -116,6 +116,10 @@ describe("HackSync Phase 3: Git Intelligence", () => {
       expect(() => {
         GitSafety.validateProjectRepoPath(authorizedRoot, "C:\\Windows\\System32");
       }).toThrow(AuthorizationError);
+
+      expect(() => {
+        GitSafety.validateProjectRepoPath(authorizedRoot, "/etc/shadow");
+      }).toThrow(AuthorizationError);
     });
 
     it("should detect symlink escapes where link resides inside root but target resolves outside", () => {

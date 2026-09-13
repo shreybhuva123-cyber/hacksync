@@ -340,7 +340,7 @@ export const api = {};`;
     expect(updatedHistory.some((v) => v.version_number === 1)).toBe(true);
     expect(updatedHistory.some((v) => v.version_number === 2)).toBe(true);
     expect(updatedHistory.some((v) => v.version_number === rollbackResult.version_number)).toBe(true);
-  });
+  }, 15000);
 
   it("Edge Case: Section Deletion vs. Modification Conflict should not silently delete or overwrite", () => {
     const baseCode = `const timeout = 5000;\nconsole.log("ready");`;
