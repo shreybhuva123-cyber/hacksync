@@ -193,9 +193,70 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
     description: "Mutating tool to apply a unified code patch to a project file. Requires user approval.",
     tier: "MUTATING",
     parameters: {
-      targetFile: { type: "string", description: "Target file path", required: true },
-      patch: { type: "string", description: "Patch code or diff content", required: true },
+      targetFile: { type: "string", description: "Target file path" },
+      patch: { type: "object", description: "Patch object or diff content" },
       summary: { type: "string", description: "Short rationale for the edit" },
+      approvalId: { type: "string", description: "Cryptographic approval ID from human approval gate" },
+    },
+  },
+
+  // ─── Core Phase 4 Testing & Fix Tools ─────────────────────────────────────
+  find_tests: {
+    name: "find_tests",
+    description: "Discover test frameworks, test files, test suites, and individual test cases across project.",
+    tier: "READ_ONLY",
+    parameters: {
+      targetFile: { type: "string", description: "Optional source file to find matching tests for" },
+    },
+  },
+  test_plan: {
+    name: "test_plan",
+    description: "Formulate a priority-ranked, targeted test plan for changed files or security findings.",
+    tier: "READ_ONLY",
+    parameters: {
+      targetFiles: { type: "array", description: "List of modified or target file paths" },
+      finding: { type: "object", description: "Optional SecurityFinding to generate regression tests for" },
+    },
+  },
+  generate_tests: {
+    name: "generate_tests",
+    description: "Generate structured, non-mutating test proposals with patch diffs targeting specific defects or edge cases.",
+    tier: "READ_ONLY",
+    parameters: {
+      targetFile: { type: "string", description: "Source file to generate test cases for", required: true },
+      finding: { type: "object", description: "Optional finding to create regression tests for" },
+      testType: { type: "string", description: "regression | edge_case | coverage" },
+    },
+  },
+  run_tests: {
+    name: "run_tests",
+    description: "Execute targeted test runner safely against an allowlisted command with injection guards and secret redaction.",
+    tier: "READ_ONLY",
+    parameters: {
+      command: { type: "string", description: "Allowlisted test execution command" },
+      targetFile: { type: "string", description: "Optional file path to run tests for" },
+    },
+  },
+  validate_patch: {
+    name: "validate_patch",
+    description: "Cryptographically validate patch integrity, base state matching, and containment within approved files.",
+    tier: "READ_ONLY",
+    parameters: {
+      patch: { type: "object", description: "Patch object to validate", required: true },
+      approvedFiles: { type: "array", description: "List of authorized file paths" },
+      expectedDiffHash: { type: "string", description: "Expected SHA-256 diff hash" },
+    },
+  },
+  verify_fix: {
+    name: "verify_fix",
+    description: "Run multi-dimensional post-patch verification: AST re-indexing, targeted tests, and security delta analysis.",
+    tier: "READ_ONLY",
+    parameters: {
+      patch: { type: "object", description: "Applied patch to verify", required: true },
+      approvalId: { type: "string", description: "Associated approval ID", required: true },
+      originalFinding: { type: "object", description: "Original security finding being remediated" },
+      testCommand: { type: "string", description: "Targeted test command to run" },
+      iterationState: { type: "object", description: "Current fix iteration state (max 3)" },
     },
   },
 };
@@ -203,6 +264,14 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
 export class ToolRegistry {
   static getTool(name: string): ToolDefinition | undefined {
     return TOOL_REGISTRY[name];
+  }
+
+  static get(name: string): ToolDefinition | undefined {
+    return TOOL_REGISTRY[name];
+  }
+
+  static has(name: string): boolean {
+    return name in TOOL_REGISTRY;
   }
 
   static getAllTools(): ToolDefinition[] {

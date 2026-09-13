@@ -13,6 +13,8 @@ export type TaskType =
   | "security"
   | "architecture"
   | "test"
+  | "fix"
+  | "verify"
   | "code_search"
   | "impact"
   | "dependency"
@@ -84,6 +86,13 @@ export interface AIResult {
   risk?: "low" | "medium" | "high" | "critical" | undefined;
   riskConfidence?: "low" | "medium" | "high" | undefined;
   securityImpact?: import("../git/git-impact").SecuritySensitiveChange[] | undefined;
+
+  // Phase 4 Testing Intelligence & Fix Verification
+  testPlan?: import("../testing/test-types").TestPlan | undefined;
+  testRun?: import("../testing/test-types").TestRun | undefined;
+  fixProposal?: import("../fixing/fix-types").FixProposal | undefined;
+  verificationResult?: import("../fixing/fix-types").VerificationResult | undefined;
+  approvalRequest?: import("./approval-gate").PendingApprovalRequest | undefined;
 }
 
 export interface OrchestratorRequest {

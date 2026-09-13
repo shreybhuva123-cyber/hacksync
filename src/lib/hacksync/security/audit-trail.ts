@@ -18,6 +18,22 @@ import { supabase } from "@/integrations/supabase/client";
 import { ExternalServiceError, logger } from "@/lib/errors";
 import { SecretRedactor } from "./secret-redactor";
 
+export type Phase4AuditAction =
+  | "TEST_PLAN_CREATED"
+  | "TEST_RUN_STARTED"
+  | "TEST_RUN_COMPLETED"
+  | "FIX_PROPOSAL_CREATED"
+  | "PATCH_GENERATED"
+  | "PATCH_VALIDATED"
+  | "APPROVAL_REQUESTED"
+  | "PATCH_APPROVED"
+  | "PATCH_REJECTED"
+  | "PATCH_APPLIED"
+  | "PATCH_ROLLBACK"
+  | "FIX_VERIFICATION_STARTED"
+  | "FIX_VERIFICATION_COMPLETED"
+  | "SECURITY_RESCAN_COMPLETED";
+
 export interface AIAuditEntry {
   id: string;
   requestId: string;
@@ -25,7 +41,10 @@ export interface AIAuditEntry {
   userId: string;
   projectId: string;
   toolName: string;
-  actionType: "READ_ONLY" | "MUTATING" | "EVALUATION" | "UNAUTHORIZED";
+  actionType: "READ_ONLY" | "MUTATING" | "EVALUATION" | "UNAUTHORIZED" | Phase4AuditAction;
+  operation?: string | undefined;
+  patchHash?: string | undefined;
+  approvalId?: string | undefined;
   status: "success" | "denied" | "failed";
   targetFiles?: string[] | undefined;
   details?: string | undefined;
@@ -88,6 +107,44 @@ export class AuditTrail {
     }
 
     return record;
+  }
+
+  /**
+   * Dedicated helper for recording Phase 4 Engineering Loop events
+   */
+  static recordPhase4Event(params: {
+    requestId: string;
+    userId: string;
+    projectId: string;
+    operation: Phase4AuditAction;
+    toolName?: string | undefined;
+    status?: "success" | "denied" | "failed" | undefined;
+    targetFiles?: string[] | undefined;
+    details?: string | undefined;
+    patchHash?: string | undefined;
+    approvalId?: string | undefined;
+    metadata?: Record<string, unknown> | undefined;
+    executionMs?: number | undefined;
+  }): AIAuditEntry {
+    return this.record({
+      requestId: params.requestId,
+      userId: params.userId,
+      projectId: params.projectId,
+      toolName: params.toolName || "phase4_engine",
+      actionType: params.operation,
+      operation: params.operation,
+      status: params.status || "success",
+      targetFiles: params.targetFiles,
+      details: params.details,
+      patchHash: params.patchHash,
+      approvalId: params.approvalId,
+      metadata: {
+        ...params.metadata,
+        patchHash: params.patchHash,
+        approvalId: params.approvalId,
+      },
+      executionMs: params.executionMs,
+    });
   }
 
   private static buildRecord(entry: Omit<AIAuditEntry, "id" | "timestamp">): AIAuditEntry {

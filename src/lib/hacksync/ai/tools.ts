@@ -27,6 +27,14 @@ import { GitStatusTool } from "./tools/git-status";
 import { GitDiffTool } from "./tools/git-diff";
 import { GitChangedSymbolsTool } from "./tools/git-changed-symbols";
 import { GitImpactTool } from "./tools/git-impact";
+import { FindTestsTool } from "./tools/find-tests";
+import { TestPlanTool } from "./tools/test-plan";
+import { GenerateTestsTool } from "./tools/generate-tests";
+import { RunTestsTool } from "./tools/run-tests";
+import { GenerateFixTool } from "./tools/generate-fix";
+import { ValidatePatchTool } from "./tools/validate-patch";
+import { ApplyPatchTool } from "./tools/apply-patch";
+import { VerifyFixTool } from "./tools/verify-fix";
 
 // ─── TOOL PERMISSION TIERS ───────────────────────────────────────────────────
 
@@ -53,6 +61,16 @@ export const TOOL_PERMISSIONS: Record<string, ToolPermissionTier> = {
   git_changed_symbols: "READ",
   git_impact: "READ",
 
+  // Core Phase 4 Testing & Fix Tools
+  find_tests: "READ",
+  test_plan: "READ",
+  generate_tests: "READ",
+  run_tests: "EXECUTE",
+  generate_fix: "READ",
+  validate_patch: "READ",
+  apply_patch: "WRITE",
+  verify_fix: "READ",
+
   // Backward-compatible READ tools
   search_project: "READ",
   read_file: "READ",
@@ -64,14 +82,11 @@ export const TOOL_PERMISSIONS: Record<string, ToolPermissionTier> = {
 
   // WRITE tools (require explicit user approval)
   modify_file: "WRITE",
-  apply_patch: "WRITE",
   create_file: "WRITE",
   delete_file: "WRITE",
-  generate_fix: "WRITE",
 
-  // EXECUTE tools (require approval + sandbox; safely disabled on host)
+  // EXECUTE tools (require approval + sandbox)
   execute_command: "EXECUTE",
-  run_tests: "EXECUTE",
   run_migration: "EXECUTE",
 };
 
@@ -307,6 +322,150 @@ export class AIToolExecutor {
           break;
         }
 
+        // ── Phase 4 Testing Intelligence & Fix Tools ─────────────────────────
+        case "find_tests": {
+          data = FindTestsTool.execute(
+            this.graph,
+            { targetFile: args["targetFile"] ? String(args["targetFile"]) : undefined },
+            this.context.projectId,
+          );
+          break;
+        }
+
+        case "test_plan": {
+          data = TestPlanTool.execute(
+            this.graph,
+            {
+              targetFile: args["targetFile"] ? String(args["targetFile"]) : (Array.isArray(args["targetFiles"]) ? args["targetFiles"][0] : undefined),
+              changedFiles: args["changedFiles"] || args["targetFiles"],
+              changedSymbols: args["changedSymbols"],
+              securityFinding: args["securityFinding"],
+              query: args["query"] ? String(args["query"]) : undefined,
+            },
+            this.context.projectId,
+          );
+          break;
+        }
+
+        case "generate_tests": {
+          data = GenerateTestsTool.execute(
+            this.graph,
+            {
+              targetFile: args["targetFile"] ? String(args["targetFile"]) : undefined,
+              targetSymbol: args["targetSymbol"] ? String(args["targetSymbol"]) : undefined,
+              framework: args["framework"] ? String(args["framework"]) : undefined,
+              existingTestPath: args["existingTestPath"] ? String(args["existingTestPath"]) : undefined,
+              securityFinding: args["securityFinding"],
+            },
+            this.context.projectId,
+          );
+          break;
+        }
+
+        case "run_tests": {
+          data = await RunTestsTool.execute(
+            this.graph,
+            {
+              command: args["command"] ? String(args["command"]) : undefined,
+              targetFile: args["targetFile"] ? String(args["targetFile"]) : undefined,
+              workspacePath: args["workspacePath"] ? String(args["workspacePath"]) : undefined,
+              options: args["options"],
+            },
+            this.context.projectId,
+          );
+          break;
+        }
+
+        case "generate_fix": {
+          const targetFile = args["filePath"] || args["targetFile"] ? String(args["filePath"] || args["targetFile"]) : undefined;
+          data = GenerateFixTool.execute(
+            this.graph,
+            {
+              finding: args["finding"],
+              filePath: targetFile,
+              issueDescription: args["issueDescription"] ? String(args["issueDescription"]) : undefined,
+            },
+            this.context.projectId,
+          );
+          break;
+        }
+
+        case "validate_patch": {
+          if (!args["patch"]) {
+            throw new Error("[validate_patch] 'patch' parameter is required.");
+          }
+          data = ValidatePatchTool.execute(
+            this.graph,
+            {
+              patch: args["patch"],
+              approvedFiles: args["approvedFiles"],
+              expectedDiffHash: args["expectedDiffHash"],
+            },
+            this.context.projectId,
+          );
+          break;
+        }
+
+        case "apply_patch": {
+          requiresApproval = true;
+          if (args["approvalId"] && args["patch"]) {
+            data = await ApplyPatchTool.execute(
+              this.graph,
+              {
+                approvalId: String(args["approvalId"]),
+                patch: args["patch"],
+                userId: this.context.userId,
+              },
+              this.context.projectId,
+              this.context.userId,
+            );
+          } else {
+            const patchSummary = String(args["summary"] || "Apply code patch");
+            const targetFiles = args["patch"]?.files?.map((f: any) => f.path) || [String(args["targetFile"] || args["path"] || "unknown")];
+            const patchDiff = args["patch"]?.files?.map((f: any) => f.diff).join("\n") || String(args["patch"] || args["diff"] || "");
+
+            const approvalReq = await ApprovalGate.createApprovalRequest({
+              requestId: this.requestId,
+              projectId: this.context.projectId,
+              userId: this.context.userId,
+              toolName: "apply_patch",
+              summary: patchSummary,
+              rationale: "Fix identified code defect via verified patch.",
+              filesAffected: targetFiles,
+              diffPreview: patchDiff,
+            });
+
+            approvalId = approvalReq.id;
+            data = {
+              status: "PENDING_APPROVAL",
+              approvalId,
+              message: "This mutating operation requires explicit user approval before execution.",
+              approvalRequest: approvalReq,
+            };
+          }
+          break;
+        }
+
+        case "verify_fix": {
+          if (!args["patch"] || !args["approvalId"]) {
+            throw new Error("[verify_fix] Both 'patch' and 'approvalId' are required.");
+          }
+          data = await VerifyFixTool.execute(
+            this.graph,
+            {
+              patch: args["patch"],
+              approvalId: String(args["approvalId"]),
+              originalFinding: args["originalFinding"],
+              testCommand: args["testCommand"] ? String(args["testCommand"]) : undefined,
+              workspacePath: args["workspacePath"] ? String(args["workspacePath"]) : undefined,
+              iterationState: args["iterationState"],
+            },
+            this.context.projectId,
+            this.context.userId,
+          );
+          break;
+        }
+
         // ── Existing / Compatibility Tools ───────────────────────────────────
         case "search_project": {
           const query = String(args["query"] || "");
@@ -347,31 +506,6 @@ export class AIToolExecutor {
         case "analyze_dependencies": {
           const packageJson = this.graph.getFileContent("package.json") || "";
           data = DependencyScanner.scan(packageJson);
-          break;
-        }
-
-        case "generate_fix": {
-          const findingId = String(args["findingId"] || "");
-          const findings = EvidenceEngine.collectFindings(this.graph);
-          const targetFinding = findings.find((f) => f.id === findingId) || findings[0];
-
-          if (!targetFinding) {
-            throw new Error(`No finding available to generate fix for.`);
-          }
-
-          data = {
-            findingId: targetFinding.id,
-            file: targetFinding.primaryLocation.filePath,
-            line: targetFinding.primaryLocation.line,
-            rootCause: targetFinding.explanation,
-            impact: targetFinding.impact,
-            fixStrategy: [
-              "1. Validate existence of target entity before accessing nested properties.",
-              "2. Return standard HTTP 401 Unauthorized or 404 Not Found without leaking internal error details.",
-              "3. Maintain existing database query parameters and authentication contracts.",
-            ],
-            suggestedPatch: targetFinding.recommendedFix,
-          };
           break;
         }
 
@@ -422,8 +556,7 @@ Return:
           break;
         }
 
-        case "modify_file":
-        case "apply_patch": {
+        case "modify_file": {
           requiresApproval = true;
           const patchSummary = String(args["summary"] || "Apply code patch");
           const targetFile = String(args["targetFile"] || args["path"] || "unknown");

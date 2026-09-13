@@ -26,7 +26,54 @@ export class TaskClassifier {
       return { taskType: "dependency", confidence: 0.92 };
     }
 
-    // 2. Security & Vulnerability Analysis
+    // 2. Verification Tasks
+    if (
+      q.includes("verify fix") ||
+      q.includes("verify patch") ||
+      q.includes("run verification") ||
+      q.includes("verify the fix") ||
+      q.startsWith("verify") ||
+      q.includes("verification")
+    ) {
+      return { taskType: "verify", confidence: 0.96 };
+    }
+
+    // 3. Fix & Remediation Tasks
+    if (
+      !q.includes("prompt to") &&
+      !q.includes("generate a prompt") &&
+      (q.includes("fix ") ||
+        q.includes("fix the ") ||
+        q.includes("generate fix") ||
+        q.includes("propose fix") ||
+        q.includes("patch for") ||
+        q.startsWith("fix"))
+    ) {
+      return { taskType: "fix", confidence: 0.95 };
+    }
+
+    // 4. Testing Intelligence Tasks
+    if (
+      q.includes("unit test") ||
+      q.includes("regression test") ||
+      q.includes("generate test") ||
+      q.includes("run test") ||
+      q.includes("run tests") ||
+      q.includes("write test") ||
+      q.includes("test suite") ||
+      q.includes("spec") ||
+      q.includes("find test") ||
+      q.includes("find tests") ||
+      q.includes("plan test") ||
+      q.includes("test plan") ||
+      q.includes("testing") ||
+      q.includes("tests") ||
+      q.includes("test")
+    ) {
+      return { taskType: "test", confidence: 0.94 };
+    }
+
+    // 5. Security & Vulnerability Analysis
     if (
       q.includes("security") ||
       q.includes("vulnerab") ||
@@ -46,21 +93,6 @@ export class TaskClassifier {
       q.includes("how secure")
     ) {
       return { taskType: "security", confidence: 0.95 };
-    }
-
-    // 3. Testing & Verification
-    if (
-      q.includes("unit test") ||
-      q.includes("regression test") ||
-      q.includes("generate test") ||
-      q.includes("run test") ||
-      q.includes("write test") ||
-      q.includes("test suite") ||
-      q.includes("spec") ||
-      q.includes("verify fix") ||
-      q.includes("testing")
-    ) {
-      return { taskType: "test", confidence: 0.94 };
     }
 
     // 4. Git & Diff Review
@@ -293,8 +325,52 @@ export class TaskClassifier {
           taskType,
           goal: "Formulate unit and regression testing strategies and test cases based on implementation code.",
           requiredEvidence: ["target_symbols", "code_snippets", "api_contracts"],
-          allowedTools: ["search_symbols", "retrieve_code", "find_references", "search_project"],
-          maxToolCalls: 4,
+          allowedTools: [
+            "find_tests",
+            "test_plan",
+            "generate_tests",
+            "run_tests",
+            "search_symbols",
+            "retrieve_code",
+            "find_references",
+            "search_project",
+          ],
+          maxToolCalls: 6,
+          requiresModel: true,
+          confidence,
+        };
+
+      case "fix":
+        return {
+          taskType,
+          goal: "Diagnose root causes, formulate FixProposals with unified diff patches, and prepare approval requests.",
+          requiredEvidence: ["ast_code_issues", "vulnerability_finding", "code_snippets"],
+          allowedTools: [
+            "generate_fix",
+            "validate_patch",
+            "apply_patch",
+            "retrieve_code",
+            "search_symbols",
+            "security_scan",
+          ],
+          maxToolCalls: 6,
+          requiresModel: true,
+          confidence,
+        };
+
+      case "verify":
+        return {
+          taskType,
+          goal: "Execute multi-dimensional post-fix verification: incremental re-indexing, targeted testing, and security rescan.",
+          requiredEvidence: ["verification_results", "test_runs", "security_rescan"],
+          allowedTools: [
+            "verify_fix",
+            "run_tests",
+            "security_scan",
+            "test_plan",
+            "retrieve_code",
+          ],
+          maxToolCalls: 6,
           requiresModel: true,
           confidence,
         };
@@ -328,9 +404,13 @@ export class TaskClassifier {
    * Backward-compatible mapping from TaskType to Phase 0/0.1 AIIntentType
    */
   static toLegacyIntent(taskType: TaskType, query?: string): AIIntentType {
+    if (taskType === "verify" || taskType === "test") {
+      return "testing";
+    }
+
     if (query) {
       const q = query.toLowerCase();
-      if (q.includes("fix") || q.includes("patch") || q.includes("prompt to fix")) {
+      if (!q.includes("verify") && (q.includes("fix") || q.includes("patch") || q.includes("prompt to fix"))) {
         return "fix";
       }
     }
@@ -341,8 +421,8 @@ export class TaskClassifier {
         return "security";
       case "debug":
         return "debug";
-      case "test":
-        return "testing";
+      case "fix":
+        return "fix";
       case "git":
         return "git";
       case "architecture":
@@ -369,7 +449,7 @@ export class TaskClassifier {
       case "testing":
         return "test";
       case "fix":
-        return "debug";
+        return "fix";
       case "git":
         return "git";
       case "architecture":

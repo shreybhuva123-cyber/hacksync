@@ -305,18 +305,34 @@ export class ApprovalGate {
   }
 
   static requestApproval(params: {
-    requestId: string;
+    requestId?: string | undefined;
     projectId: string;
     userId: string;
     toolName: string;
-    summary: string;
-    rationale: string;
-    filesAffected: string[];
+    summary?: string | undefined;
+    rationale?: string | undefined;
+    filesAffected?: string[] | undefined;
     diffPreview?: string | undefined;
     operation?: string | undefined;
-    ttlMs?: number;
+    ttlMs?: number | undefined;
+    reason?: string | undefined;
+    risk?: string | undefined;
+    patchHash?: string | undefined;
+    targetFiles?: string[] | undefined;
+    arguments?: Record<string, any> | undefined;
   }): ApprovalPromise {
-    return this.createApprovalRequest(params);
+    return this.createApprovalRequest({
+      requestId: params.requestId || `req_${Date.now()}`,
+      projectId: params.projectId,
+      userId: params.userId,
+      toolName: params.toolName,
+      summary: params.summary || params.reason || `Execute ${params.toolName}`,
+      rationale: params.rationale || params.reason || "Authorized change request",
+      filesAffected: params.filesAffected || params.targetFiles || [],
+      diffPreview: params.diffPreview,
+      operation: params.operation || params.toolName,
+      ttlMs: params.ttlMs,
+    });
   }
 
   /**
@@ -333,7 +349,7 @@ export class ApprovalGate {
     filesAffected: string[];
     diffPreview?: string | undefined;
     operation?: string | undefined;
-    ttlMs?: number;
+    ttlMs?: number | undefined;
   }): ApprovalPromise {
     const id = `appr_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const now = new Date();
@@ -572,6 +588,38 @@ export class ApprovalGate {
     };
 
     return Object.assign(resolutionPromise, syncReq) as ApprovalPromise;
+  }
+
+  /**
+   * Helper to approve a pending request.
+   */
+  static approve(
+    approvalId: string,
+    userId?: string,
+    context?: { role?: string; projectId?: string },
+  ): ApprovalPromise {
+    return this.resolveApproval({
+      approvalId,
+      decision: "approved",
+      userId,
+      projectId: context?.projectId,
+    });
+  }
+
+  /**
+   * Helper to reject a pending request.
+   */
+  static reject(
+    approvalId: string,
+    userId?: string,
+    context?: { role?: string; projectId?: string },
+  ): ApprovalPromise {
+    return this.resolveApproval({
+      approvalId,
+      decision: "rejected",
+      userId,
+      projectId: context?.projectId,
+    });
   }
 
   static getPendingForProject(projectId: string): PendingApprovalRequest[] {

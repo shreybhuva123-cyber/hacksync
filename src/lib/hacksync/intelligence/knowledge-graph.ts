@@ -74,7 +74,33 @@ export class ProjectKnowledgeGraph {
   }
 
   getAllFilePaths(): string[] {
-    return Array.from(this.files.keys());
+    return Array.from(this.fileContents.keys());
+  }
+
+  /**
+   * Removes a file and its symbols/dependencies from the knowledge graph.
+   */
+  removeFile(path: string): void {
+    if (this.files.has(path) || this.fileContents.has(path)) {
+      this.symbolIndex.removeSymbolsForFile(path);
+      this.projectDependencyGraph.removeEdgesForSource(path);
+      const oldSummary = this.files.get(path);
+      if (oldSummary) {
+        oldSummary.symbols.forEach((s) => {
+          const list = this.symbolTable.get(s.name);
+          if (list) {
+            const filtered = list.filter((item) => item.filePath !== path);
+            if (filtered.length > 0) this.symbolTable.set(s.name, filtered);
+            else this.symbolTable.delete(s.name);
+          }
+        });
+      }
+      this.files.delete(path);
+      this.fileContents.delete(path);
+      this.fileHashes.delete(path);
+      this.dependencyGraph.delete(path);
+      this.dependentsGraph.delete(path);
+    }
   }
 
   /**
