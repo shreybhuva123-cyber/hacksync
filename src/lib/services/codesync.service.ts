@@ -47,7 +47,7 @@ let isSyncExecutionLocked = false;
 /**
  * Timeout wrapper for database calls so unit tests and offline environments never hang indefinitely
  */
-async function withDbTimeout<T>(promise: PromiseLike<T> | Promise<T> | any, timeoutMs = 2500): Promise<T | null> {
+async function withDbTimeout<T>(promise: PromiseLike<T> | Promise<T> | any, timeoutMs = 750): Promise<T | null> {
   try {
     return await Promise.race([
       Promise.resolve(promise).catch(() => null),
@@ -484,128 +484,105 @@ export const codeSyncService = {
       const allContributors = new Set<string>([actorName]);
       const createdVersions: FileVersion[] = [];
 
-      // 1. Process each file and record version history
-      for (const item of resolvedItems) {
-        const cleanPath = item.path.replace(/^\/+/, "").replace(/\\/g, "/");
-        const parentPath = cleanPath.includes("/")
-          ? cleanPath.substring(0, cleanPath.lastIndexOf("/"))
-          : null;
+      // 1. Process all files concurrently and record version history
+      await Promise.all(
+        resolvedItems.map(async (item) => {
+          const cleanPath = item.path.replace(/^\/+/, "").replace(/\\/g, "/");
+          const parentPath = cleanPath.includes("/")
+            ? cleanPath.substring(0, cleanPath.lastIndexOf("/"))
+            : null;
 
-        const validOwnerRole = (["frontend", "backend", "database", "lead"].includes(item.ownerRole)
-          ? item.ownerRole
-          : "lead") as "frontend" | "backend" | "database" | "lead";
+          const validOwnerRole = (["frontend", "backend", "database", "lead"].includes(item.ownerRole)
+            ? item.ownerRole
+            : "lead") as "frontend" | "backend" | "database" | "lead";
 
-        const itemContributors = item.contributors && item.contributors.length > 0
-          ? item.contributors
-          : [actorName];
+          const itemContributors = item.contributors && item.contributors.length > 0
+            ? item.contributors
+            : [actorName];
 
-        for (const c of itemContributors) allContributors.add(c);
+          for (const c of itemContributors) allContributors.add(c);
 
-        const contentHash = computeFastHash(item.content);
+          const contentHash = computeFastHash(item.content);
 
-        // Fetch existing node from Supabase (with timeout fallback)
-        const existingRes = await withDbTimeout(
-          supabase
-            .from("code_nodes")
-            .select("id, current_version_number, content")
-            .eq("project_id", projectId)
-            .eq("path", cleanPath)
-            .maybeSingle(),
-          1500,
-        );
-
-        const existing = (existingRes as any)?.data as { id: string; current_version_number?: number; content?: string } | null;
-        const storedHistory = getStoredFileVersions(projectId, cleanPath);
-        const highestStored = storedHistory.length > 0
-          ? Math.max(...storedHistory.map((h) => h.version_number))
-          : 0;
-
-        const currentVer = existing?.current_version_number || (highestStored > 0 ? highestStored : 1);
-        const nextVer = (existing || highestStored > 0) ? currentVer + 1 : 1;
-
-        const changeType = (!existing && highestStored === 0)
-          ? "initial"
-          : item.changeType === "auto_merged"
-            ? "auto_merge"
-            : (options.conflictsResolvedCount && options.conflictsResolvedCount > 0 ? "manual_merge" : "edit");
-
-        let nodeId = existing?.id;
-
-        // Upsert code_nodes table
-        if (existing && existing.id) {
-          await withDbTimeout(
+          // Fetch existing node from Supabase (with timeout fallback)
+          const existingRes = await withDbTimeout(
             supabase
               .from("code_nodes")
-              .update({
-                content: item.content,
-                area: item.area,
-                owner_role: validOwnerRole,
-                status: "done",
-                language: item.language,
-                current_version_number: nextVer,
-                content_hash: contentHash,
-                last_synced_by: actorName,
-                contributors: itemContributors,
-                updated_at: new Date().toISOString(),
-              } as any)
-              .eq("id", existing.id),
-            1500,
-          );
-        } else {
-          const insertRes = await withDbTimeout(
-            supabase
-              .from("code_nodes")
-              .insert({
-                project_id: projectId,
-                path: cleanPath,
-                parent_path: parentPath,
-                kind: "file",
-                area: item.area,
-                owner_role: validOwnerRole,
-                status: "done",
-                language: item.language,
-                content: item.content,
-                current_version_number: 1,
-                content_hash: contentHash,
-                last_synced_by: actorName,
-                contributors: itemContributors,
-              } as any)
-              .select("id")
+              .select("id, current_version_number, content")
+              .eq("project_id", projectId)
+              .eq("path", cleanPath)
               .maybeSingle(),
-            1500,
+            750,
           );
-          if ((insertRes as any)?.data?.id) {
-            nodeId = (insertRes as any).data.id;
+
+          const existing = (existingRes as any)?.data as { id: string; current_version_number?: number; content?: string } | null;
+          const storedHistory = getStoredFileVersions(projectId, cleanPath);
+          const highestStored = storedHistory.length > 0
+            ? Math.max(...storedHistory.map((h) => h.version_number))
+            : 0;
+
+          const currentVer = existing?.current_version_number || (highestStored > 0 ? highestStored : 1);
+          const nextVer = (existing || highestStored > 0) ? currentVer + 1 : 1;
+
+          const changeType = (!existing && highestStored === 0)
+            ? "initial"
+            : item.changeType === "auto_merged"
+              ? "auto_merge"
+              : (options.conflictsResolvedCount && options.conflictsResolvedCount > 0 ? "manual_merge" : "edit");
+
+          let nodeId = existing?.id;
+
+          // Upsert code_nodes table
+          if (existing && existing.id) {
+            await withDbTimeout(
+              supabase
+                .from("code_nodes")
+                .update({
+                  content: item.content,
+                  area: item.area,
+                  owner_role: validOwnerRole,
+                  status: "done",
+                  language: item.language,
+                  current_version_number: nextVer,
+                  content_hash: contentHash,
+                  last_synced_by: actorName,
+                  contributors: itemContributors,
+                  updated_at: new Date().toISOString(),
+                } as any)
+                .eq("id", existing.id),
+              750,
+            );
+          } else {
+            const insertRes = await withDbTimeout(
+              supabase
+                .from("code_nodes")
+                .insert({
+                  project_id: projectId,
+                  path: cleanPath,
+                  parent_path: parentPath,
+                  kind: "file",
+                  area: item.area,
+                  owner_role: validOwnerRole,
+                  status: "done",
+                  language: item.language,
+                  content: item.content,
+                  current_version_number: 1,
+                  content_hash: contentHash,
+                  last_synced_by: actorName,
+                  contributors: itemContributors,
+                } as any)
+                .select("id")
+                .maybeSingle(),
+              750,
+            );
+            if ((insertRes as any)?.data?.id) {
+              nodeId = (insertRes as any).data.id;
+            }
           }
-        }
 
-        // Record immutable file version
-        const newVersionRecord: FileVersion = {
-          id: `fv-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          project_id: projectId,
-          node_id: nodeId || null,
-          file_path: cleanPath,
-          version_number: nextVer,
-          content: item.content,
-          content_hash: contentHash,
-          base_version_number: existing ? currentVer : null,
-          parent_version_number: existing ? currentVer : null,
-          created_by_user_id: null,
-          created_by_name: actorName,
-          created_by_role: actorRole,
-          contributors: itemContributors,
-          change_summary: `CodeSync #${sessionNum}: ${changeType} by ${itemContributors.join(", ")}`,
-          change_type: changeType,
-          created_at: new Date().toISOString(),
-        };
-
-        // Save to persistent localStorage cache
-        saveStoredFileVersion(projectId, newVersionRecord);
-        createdVersions.push(newVersionRecord);
-
-        // Attempt background insert to Supabase file_versions table
-        void withDbTimeout(
-          (supabase.from as any)("file_versions").insert({
+          // Record immutable file version
+          const newVersionRecord: FileVersion = {
+            id: `fv-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
             project_id: projectId,
             node_id: nodeId || null,
             file_path: cleanPath,
@@ -614,30 +591,51 @@ export const codeSyncService = {
             content_hash: contentHash,
             base_version_number: existing ? currentVer : null,
             parent_version_number: existing ? currentVer : null,
+            created_by_user_id: null,
             created_by_name: actorName,
             created_by_role: actorRole,
             contributors: itemContributors,
-            change_summary: newVersionRecord.change_summary,
+            change_summary: `CodeSync #${sessionNum}: ${changeType} by ${itemContributors.join(", ")}`,
             change_type: changeType,
-          }),
-          1500,
-        );
-      }
+            created_at: new Date().toISOString(),
+          };
 
-      // 2. Mark member_files as synced in database and update their base versions
-      try {
-        await withDbTimeout(
-          (supabase.from as any)("member_files")
-            .update({
-              sync_status: "synced",
-              updated_at: new Date().toISOString(),
-            })
-            .eq("project_id", projectId),
-          1500,
-        );
-      } catch {
-        // Non-blocking
-      }
+          // Save to persistent localStorage cache
+          saveStoredFileVersion(projectId, newVersionRecord);
+          createdVersions.push(newVersionRecord);
+
+          // Non-blocking background insert to Supabase file_versions table
+          void withDbTimeout(
+            (supabase.from as any)("file_versions").insert({
+              project_id: projectId,
+              node_id: nodeId || null,
+              file_path: cleanPath,
+              version_number: nextVer,
+              content: item.content,
+              content_hash: contentHash,
+              base_version_number: existing ? currentVer : null,
+              parent_version_number: existing ? currentVer : null,
+              created_by_name: actorName,
+              created_by_role: actorRole,
+              contributors: itemContributors,
+              change_summary: newVersionRecord.change_summary,
+              change_type: changeType,
+            }),
+            750,
+          );
+        }),
+      );
+
+      // 2. Mark member_files as synced in database (non-blocking background)
+      void withDbTimeout(
+        (supabase.from as any)("member_files")
+          .update({
+            sync_status: "synced",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("project_id", projectId),
+        750,
+      );
 
       // 3. Record Sync Session in sync_sessions
       const sessionSummary = {
@@ -683,7 +681,7 @@ export const codeSyncService = {
             })
             .select("*")
             .single(),
-          1500,
+          750,
         );
         if (syncRes && (syncRes as any).data) {
           session = (syncRes as any).data as unknown as SyncSession;
@@ -692,21 +690,17 @@ export const codeSyncService = {
         // Non-blocking
       }
 
-      // 4. Log to activity_events
-      try {
-        await withDbTimeout(
-          supabase.from("activity_events").insert({
-            project_id: projectId,
-            kind: "code",
-            actor: actorName,
-            actor_role: actorRole,
-            message: `CodeSync #${sessionNum} Complete: Synchronized ${resolvedItems.length} files (${options.autoMergedCount || 0} auto-merged) from ${Array.from(allContributors).join(", ")}`,
-          }),
-          1500,
-        );
-      } catch {
-        // Non-blocking
-      }
+      // 4. Log to activity_events (non-blocking background)
+      void withDbTimeout(
+        supabase.from("activity_events").insert({
+          project_id: projectId,
+          kind: "code",
+          actor: actorName,
+          actor_role: actorRole,
+          message: `CodeSync #${sessionNum} Complete: Synchronized ${resolvedItems.length} files (${options.autoMergedCount || 0} auto-merged) from ${Array.from(allContributors).join(", ")}`,
+        }),
+        750,
+      );
 
       return session;
     } finally {

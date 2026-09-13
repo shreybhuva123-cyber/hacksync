@@ -885,7 +885,7 @@ function MarkdownParagraph({ text }: { text: string }) {
 }
 
 /** Renders inline markdown: bold, inline code, links, italic */
-function renderInline(text: string): React.ReactNode {
+function renderInline(text?: string | null): React.ReactNode {
   if (!text) return null;
 
   // Split on inline patterns: **bold**, `code`, [text](url), *italic*

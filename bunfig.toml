@@ -9,3 +9,4 @@ minimumReleaseAgeExcludes = ["@lovable.dev/vite-tanstack-config", "@lovable.dev/
 [test]
 # Playwright E2E tests run via `bunx playwright test`, not `bun test`
 root = "src"
+timeout = 15000

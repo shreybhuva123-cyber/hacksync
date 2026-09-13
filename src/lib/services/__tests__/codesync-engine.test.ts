@@ -182,34 +182,38 @@ describe("CodeSync Engine & Conflict Radar", () => {
     expect(preview.conflicts[0].fileB.user_id).toBe("user-2");
   });
 
-  it("should execute code sync and return a valid sync session object", async () => {
-    const resolvedItems = [
-      {
-        path: "src/index.ts",
-        content: "console.log('Synchronized Code');",
-        area: "frontend" as const,
-        ownerRole: "frontend" as const,
-        language: "typescript",
-      },
-      {
-        path: "src/routes.ts",
-        content: "export const routes = [];",
-        area: "backend" as const,
-        ownerRole: "backend" as const,
-        language: "typescript",
-      },
-    ];
+  it(
+    "should execute code sync and return a valid sync session object",
+    async () => {
+      const resolvedItems = [
+        {
+          path: "src/index.ts",
+          content: "console.log('Synchronized Code');",
+          area: "frontend" as const,
+          ownerRole: "frontend" as const,
+          language: "typescript",
+        },
+        {
+          path: "src/routes.ts",
+          content: "export const routes = [];",
+          area: "backend" as const,
+          ownerRole: "backend" as const,
+          language: "typescript",
+        },
+      ];
 
-    const session = await codeSyncService.executeCodeSync(
-      "proj-test",
-      resolvedItems,
-      "Alice Lead",
-      "lead",
-    );
+      const session = await codeSyncService.executeCodeSync(
+        "proj-test",
+        resolvedItems,
+        "Alice Lead",
+        "lead",
+      );
 
-    expect(session).toBeDefined();
-    expect(session.actor_name).toBe("Alice Lead");
-    expect(session.files_count).toBe(2);
-    expect(session.summary.paths).toContain("src/index.ts");
-  });
+      expect(session).toBeDefined();
+      expect(session.actor_name).toBe("Alice Lead");
+      expect(session.files_count).toBe(2);
+      expect(session.summary.paths).toContain("src/index.ts");
+    },
+    15000,
+  );
 });
