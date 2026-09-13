@@ -258,23 +258,27 @@ export interface ModelComparisonReport {
 }
 
 export interface BenchmarkFilterOptions {
-  categories?: BenchmarkCategory[];
-  tags?: string[];
-  difficulties?: BenchmarkDifficulty[];
-  ids?: string[];
-  maxCases?: number;
+  categories?: BenchmarkCategory[] | undefined;
+  tags?: string[] | undefined;
+  difficulties?: BenchmarkDifficulty[] | undefined;
+  ids?: string[] | undefined;
+  maxCases?: number | undefined;
+  [key: string]: unknown;
 }
 
 export interface EvaluationRunnerOptions {
   projectId: string;
   userId: string;
-  environment?: string;
-  versionCommit?: string;
-  provider?: string;
-  model?: string;
-  timeoutMsPerCase?: number;
-  totalTimeoutMs?: number;
-  filter?: BenchmarkFilterOptions;
-  regressionThresholds?: Partial<RegressionThresholds>;
-  baselineRun?: BenchmarkRun;
+  environment?: string | undefined;
+  versionCommit?: string | undefined;
+  provider?: string | undefined;
+  model?: string | undefined;
+  judgeModel?: string | undefined;
+  evaluationMethod?: ("deterministic" | "heuristic" | "model" | "human") | undefined;
+  benchmarkVersion?: string | undefined;
+  timeoutMsPerCase?: number | undefined;
+  totalTimeoutMs?: number | undefined;
+  filter?: BenchmarkFilterOptions | undefined;
+  regressionThresholds?: Partial<RegressionThresholds> | undefined;
+  baselineRun?: BenchmarkRun | undefined;
 }

@@ -35,6 +35,9 @@ import { GenerateFixTool } from "./tools/generate-fix";
 import { ValidatePatchTool } from "./tools/validate-patch";
 import { ApplyPatchTool } from "./tools/apply-patch";
 import { VerifyFixTool } from "./tools/verify-fix";
+import { EvaluationEngine } from "../evaluation/evaluation-engine";
+import { BenchmarkLoader } from "../evaluation/benchmark-loader";
+import { ModelComparisonEngine } from "../evaluation/model-comparison";
 
 // ─── TOOL PERMISSION TIERS ───────────────────────────────────────────────────
 
@@ -70,6 +73,13 @@ export const TOOL_PERMISSIONS: Record<string, ToolPermissionTier> = {
   validate_patch: "READ",
   apply_patch: "WRITE",
   verify_fix: "READ",
+
+  // Phase 6 Evaluation Tools (Safe READ_ONLY)
+  run_benchmark: "READ",
+  get_evaluation_history: "READ",
+  compare_models: "READ",
+  get_regressions: "READ",
+  get_evaluation_metrics: "READ",
 
   // Backward-compatible READ tools
   search_project: "READ",
@@ -579,6 +589,51 @@ Return:
             approvalId,
             message: "This mutating operation requires explicit user approval before execution.",
             approvalRequest: approvalReq,
+          };
+          break;
+        }
+
+        case "run_benchmark": {
+          const categories = args["categories"] as any;
+          const model = args["model"] ? String(args["model"]) : undefined;
+          const provider = args["provider"] ? String(args["provider"]) : undefined;
+          data = await EvaluationEngine.runBenchmark({
+            projectId: this.context.projectId,
+            userId: this.context.userId,
+            provider,
+            model,
+            filter: categories ? { categories } : undefined,
+          });
+          break;
+        }
+
+        case "get_evaluation_history": {
+          data = await EvaluationEngine.getRuns(this.context.projectId);
+          break;
+        }
+
+        case "compare_models": {
+          const modelA = args["modelA"] as any;
+          const modelB = args["modelB"] as any;
+          if (!modelA || !modelB) {
+            throw new Error("Both modelA and modelB are required for model comparison.");
+          }
+          data = ModelComparisonEngine.compareModels(modelA, modelB);
+          break;
+        }
+
+        case "get_regressions": {
+          const runId = String(args["runId"] || "");
+          const run = await EvaluationEngine.getRunById(runId);
+          data = run ? run.regressions : [];
+          break;
+        }
+
+        case "get_evaluation_metrics": {
+          const allCases = BenchmarkLoader.getAllCases();
+          data = {
+            caseCount: allCases.length,
+            categories: Array.from(new Set(allCases.map((c) => c.category))),
           };
           break;
         }

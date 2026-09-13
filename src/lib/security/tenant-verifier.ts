@@ -48,6 +48,9 @@ export async function verifyProjectMembership(
     if (userId.includes("lead") || userId.includes("owner")) {
       return { allowed: true, role: "lead" };
     }
+    if (!process.env["SUPABASE_SERVICE_ROLE_KEY"]) {
+      return { allowed: false, role: "member" };
+    }
   }
 
   // 2. Authoritative database lookup

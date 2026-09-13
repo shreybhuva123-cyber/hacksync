@@ -22,6 +22,22 @@ import type {
 import { supabase } from "@/integrations/supabase/client";
 
 export class EvaluationEngine {
+  private static inMemoryRuns: Map<string, BenchmarkRun> = new Map();
+
+  /**
+   * Retrieves benchmark runs for a project.
+   */
+  static async getRuns(projectId: string): Promise<BenchmarkRun[]> {
+    return Array.from(this.inMemoryRuns.values()).filter((r) => r.projectId === projectId);
+  }
+
+  /**
+   * Retrieves a benchmark run by ID.
+   */
+  static async getRunById(runId: string): Promise<BenchmarkRun | null> {
+    return this.inMemoryRuns.get(runId) || null;
+  }
+
   /**
    * Executes a full or filtered benchmark evaluation run.
    * Strictly enforces project membership authorization before execution.
@@ -70,6 +86,7 @@ export class EvaluationEngine {
       // Graceful fallback if database is offline or unmigrated in local test env
     }
 
+    this.inMemoryRuns.set(run.runId, run);
     return run;
   }
 

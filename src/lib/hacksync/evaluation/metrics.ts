@@ -194,3 +194,95 @@ export function formatMetric(val: MetricValue, asPercentage = true, decimals = 1
   }
   return val.toFixed(decimals);
 }
+
+export interface StatisticalSummary {
+  sampleCount: number;
+  passCount: number;
+  failCount: number;
+  mean: number | "not_applicable";
+  median: number | "not_applicable";
+  min: number | "not_applicable";
+  max: number | "not_applicable";
+  confidence: "sufficient" | "insufficient_sample";
+}
+
+/**
+ * Computes mean, median, min, max, and statistical sample confidence.
+ * Avoids faking statistical confidence when the dataset is too small (< minSampleSize).
+ */
+export function calculateStatistics(
+  scores: number[],
+  minSampleSize = 5,
+  passingThreshold = 70,
+): StatisticalSummary {
+  if (!scores || scores.length === 0) {
+    return {
+      sampleCount: 0,
+      passCount: 0,
+      failCount: 0,
+      mean: "not_applicable",
+      median: "not_applicable",
+      min: "not_applicable",
+      max: "not_applicable",
+      confidence: "insufficient_sample",
+    };
+  }
+
+  const sorted = [...scores].sort((a, b) => a - b);
+  const sampleCount = sorted.length;
+  const passCount = sorted.filter((s) => s >= passingThreshold).length;
+  const failCount = sampleCount - passCount;
+
+  const sum = sorted.reduce((acc, curr) => acc + curr, 0);
+  const mean = Number((sum / sampleCount).toFixed(2));
+
+  let median: number;
+  const mid = Math.floor(sampleCount / 2);
+  if (sampleCount % 2 === 0) {
+    median = Number(((sorted[mid - 1]! + sorted[mid]!) / 2).toFixed(2));
+  } else {
+    median = sorted[mid]!;
+  }
+
+  const min = sorted[0]!;
+  const max = sorted[sampleCount - 1]!;
+  const confidence = sampleCount >= minSampleSize ? "sufficient" : "insufficient_sample";
+
+  return {
+    sampleCount,
+    passCount,
+    failCount,
+    mean,
+    median,
+    min,
+    max,
+    confidence,
+  };
+}
+
+/**
+ * Computes p50, p90, p95, and p99 percentiles from a series of numeric values.
+ */
+export function calculatePercentiles(values: number[]): {
+  p50: number;
+  p90: number;
+  p95: number;
+  p99: number;
+} {
+  if (!values || values.length === 0) {
+    return { p50: 0, p90: 0, p95: 0, p99: 0 };
+  }
+
+  const sorted = [...values].sort((a, b) => a - b);
+  const getP = (p: number): number => {
+    const idx = Math.ceil((p / 100) * sorted.length) - 1;
+    return sorted[Math.max(0, Math.min(sorted.length - 1, idx))] || 0;
+  };
+
+  return {
+    p50: getP(50),
+    p90: getP(90),
+    p95: getP(95),
+    p99: getP(99),
+  };
+}

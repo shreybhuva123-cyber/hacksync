@@ -259,6 +259,47 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
       iterationState: { type: "object", description: "Current fix iteration state (max 3)" },
     },
   },
+
+  // ─── Phase 6 Evaluation & Benchmarking Tools ──────────────────────────────
+  run_benchmark: {
+    name: "run_benchmark",
+    description: "Execute a deterministic or multi-model benchmark evaluation suite against project fixtures.",
+    tier: "READ_ONLY",
+    parameters: {
+      categories: { type: "array", description: "Optional category filters" },
+      model: { type: "string", description: "Target model identifier" },
+      provider: { type: "string", description: "Target provider identifier" },
+    },
+  },
+  get_evaluation_history: {
+    name: "get_evaluation_history",
+    description: "Retrieve past benchmark evaluation runs, scores, and reproducibility metadata for this project.",
+    tier: "READ_ONLY",
+    parameters: {},
+  },
+  compare_models: {
+    name: "compare_models",
+    description: "Perform multi-metric side-by-side comparison between two models across retrieval, security, fixing, and cost.",
+    tier: "READ_ONLY",
+    parameters: {
+      modelA: { type: "string", description: "First model (e.g. gpt-4o)", required: true },
+      modelB: { type: "string", description: "Second model (e.g. claude-3-5-sonnet)", required: true },
+    },
+  },
+  get_regressions: {
+    name: "get_regressions",
+    description: "Check for relative and absolute regressions between candidate run and baseline run.",
+    tier: "READ_ONLY",
+    parameters: {
+      runId: { type: "string", description: "Candidate run ID to inspect", required: true },
+    },
+  },
+  get_evaluation_metrics: {
+    name: "get_evaluation_metrics",
+    description: "List available benchmark metrics, dataset cases, and category coverage.",
+    tier: "READ_ONLY",
+    parameters: {},
+  },
 };
 
 export class ToolRegistry {

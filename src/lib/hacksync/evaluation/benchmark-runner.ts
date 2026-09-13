@@ -1,12 +1,19 @@
 /**
- * HackSync Phase 5: Benchmark Runner Engine
+ * HackSync Phase 6: Benchmark Runner Engine (Hardened)
  * Executes benchmark evaluation runs with per-case timeouts, total timeouts,
- * category dispatching, regression detection, and observability logging.
+ * category dispatching, SHA-256 reproducibility configuration hashing,
+ * Regression Engine 2.0 dual-delta detection, and observability logging.
  */
 
 import { BenchmarkLoader } from "./benchmark-loader";
 import { ScoringEngine } from "./scoring-engine";
 import { RegressionDetector } from "./regression-detector";
+import { RegressionEngine2 } from "./regression-engine";
+import { BenchmarkVersionManager } from "./benchmark-version";
+import { BenchmarkCaseRunner } from "./benchmark-case-runner";
+import { CostTracker } from "../observability/cost-tracker";
+import { LatencyTracker } from "../observability/latency-tracker";
+import { EvaluationContext } from "./evaluation-context";
 import { SecurityEvaluator } from "./evaluators/security-evaluator";
 import { RetrievalEvaluator } from "./evaluators/retrieval-evaluator";
 import { CitationEvaluator } from "./evaluators/citation-evaluator";
@@ -35,33 +42,33 @@ export class BenchmarkRunner {
       case "security":
       case "secrets":
       case "dependency_security":
-        return await SecurityEvaluator.evaluate(caseItem);
+        return await SecurityEvaluator.evaluate(caseItem as any);
 
       case "retrieval":
-        return await RetrievalEvaluator.evaluate(caseItem);
+        return await RetrievalEvaluator.evaluate(caseItem as any);
 
       case "citation":
-        return await CitationEvaluator.evaluate(caseItem);
+        return await CitationEvaluator.evaluate(caseItem as any);
 
       case "fix_generation":
-        return await FixEvaluator.evaluate(caseItem);
+        return await FixEvaluator.evaluate(caseItem as any);
 
       case "testing":
       case "test_generation":
-        return await TestingEvaluator.evaluate(caseItem);
+        return await TestingEvaluator.evaluate(caseItem as any);
 
       case "git_impact":
-        return await GitEvaluator.evaluate(caseItem);
+        return await GitEvaluator.evaluate(caseItem as any);
 
       case "verification":
-        return await VerificationEvaluator.evaluate(caseItem);
+        return await VerificationEvaluator.evaluate(caseItem as any);
 
       case "code_understanding":
       case "debugging":
       case "architecture":
       case "hallucination_resistance":
       default:
-        return await AnswerEvaluator.evaluate(caseItem);
+        return await AnswerEvaluator.evaluate(caseItem as any);
     }
   }
 
@@ -88,7 +95,7 @@ export class BenchmarkRunner {
         provider,
         model,
         configHash: "unavailable_hash",
-        benchmarkVersion: "1.0.0",
+        benchmarkVersion: options.benchmarkVersion || "1.0.0",
         caseCount: 0,
         passedCases: 0,
         failedCases: 0,
@@ -108,6 +115,16 @@ export class BenchmarkRunner {
     const caseTimeoutMs = options.timeoutMsPerCase || this.DEFAULT_CASE_TIMEOUT_MS;
     const results: CaseEvaluationResult[] = [];
     let errorCount = 0;
+
+    const evalContext = new EvaluationContext({
+      projectId: options.projectId,
+      userId: options.userId || "eval-runner",
+      benchmarkRunId: runId,
+      provider,
+      generatorModel: model,
+      judgeModel: options.judgeModel || model,
+      evaluationMethod: options.evaluationMethod || "deterministic",
+    });
 
     for (const caseItem of cases) {
       const caseStart = Date.now();
@@ -152,7 +169,14 @@ export class BenchmarkRunner {
     // Compute aggregate scores and metrics
     const scores = ScoringEngine.computeBenchmarkScores(results);
 
-    // Build the initial BenchmarkRun object
+    // Compute deterministic SHA-256 configuration hash
+    const configHash = BenchmarkVersionManager.computeConfigurationHash({
+      model,
+      provider,
+      options: options.filter || {},
+    });
+
+    // Build the BenchmarkRun object
     let benchmarkRun: BenchmarkRun = {
       runId,
       projectId: options.projectId,
@@ -162,8 +186,8 @@ export class BenchmarkRunner {
       environment: options.environment || "test",
       provider,
       model,
-      configHash: `cfg_${Date.now()}`,
-      benchmarkVersion: "1.0.0",
+      configHash,
+      benchmarkVersion: options.benchmarkVersion || "benchmark-v2.0.0",
       caseCount: cases.length,
       passedCases: scores.passedCases,
       failedCases: scores.failedCases,
@@ -177,7 +201,7 @@ export class BenchmarkRunner {
       results,
     };
 
-    // If a baseline run is provided, detect regressions
+    // If a baseline run is provided, detect regressions with both RegressionDetector (v1) and RegressionEngine2 (v2)
     if (options.baselineRun) {
       const regReport = RegressionDetector.detect(
         benchmarkRun,
@@ -185,6 +209,14 @@ export class BenchmarkRunner {
         options.regressionThresholds,
       );
       benchmarkRun.regressions = regReport.regressions;
+
+      // Also compute V2 dual-delta regression report
+      const regV2 = RegressionEngine2.compare(
+        options.baselineRun,
+        benchmarkRun,
+        options.regressionThresholds as any,
+      );
+      (benchmarkRun as any).regressionReportV2 = regV2;
     }
 
     return benchmarkRun;
