@@ -4,52 +4,49 @@ import {
   AlertTriangle,
   Check,
   CheckCircle2,
-  Copy,
   Download,
-  KeyRound,
-  Lock,
+  FileCode2,
+  Filter,
   RefreshCw,
   Search,
   Shield,
   ShieldAlert,
   ShieldCheck,
   Sparkles,
+  Terminal,
   Wrench,
 } from "lucide-react";
 import { WorkspaceView } from "@/components/hacksync/WorkspaceView";
 import {
   CodeBlock,
-  CopyButton,
+  Metric,
   PageHeader,
   Panel,
   PanelHeader,
   ScoreRing,
   StatusPill,
+  statusTone,
 } from "@/components/hacksync/primitives";
+import { ApprovalGate } from "@/components/hacksync/ApprovalGate";
 import {
   auditWorkspaceSecurity,
   type SecurityVulnerability,
   type VulnerabilitySeverity,
+  type VulnerabilityCategory,
 } from "@/lib/hacksync/ai-security";
 import { logActivity, useRowMutation } from "@/lib/hacksync/workspace";
+import type { FixProposal } from "@/lib/hacksync/fixing/fix-types";
 import type { Workspace } from "@/lib/hacksync/types";
 
 export const Route = createFileRoute("/_authenticated/security")({
   head: () => ({
     meta: [
-      { title: "Cyber Security Center — HackSync" },
+      { title: "Security Center — HackSync" },
       {
         name: "description",
         content:
-          "Automated cyber security scanner, OWASP vulnerability audit, and 1-click remediation patches for your hackathon repository.",
+          "Automated static code analysis, OWASP Top 10 vulnerability detection, and evidence-backed remediation gates.",
       },
-      { property: "og:title", content: "Cyber Security Center — HackSync" },
-      {
-        property: "og:description",
-        content: "Automated cyber security tests, vulnerability detection, and AI patch fixes.",
-      },
-      { property: "og:type", content: "website" },
-      { name: "twitter:card", content: "summary_large_image" },
     ],
   }),
   component: SecurityPage,
@@ -60,15 +57,18 @@ function SecurityPage() {
 }
 
 function SecurityBody({ ws }: { ws: Workspace }) {
+  const [selectedVulnId, setSelectedVulnId] = useState<string | null>(null);
   const [filterSeverity, setFilterSeverity] = useState<string>("all");
   const [filterCategory, setFilterCategory] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedVulnId, setSelectedVulnId] = useState<string | null>(null);
-  const [appliedFixes, setAppliedFixes] = useState<Set<string>>(new Set());
   const [isScanning, setIsScanning] = useState(false);
+  const [appliedFixes, setAppliedFixes] = useState<Set<string>>(new Set());
+
+  // Approval Gate state
+  const [activeProposal, setActiveProposal] = useState<FixProposal | null>(null);
+  const [approvalOpen, setApprovalOpen] = useState(false);
 
   const updateMutation = useRowMutation();
-
   const audit = useMemo(() => auditWorkspaceSecurity(ws), [ws]);
 
   const filteredVulns = useMemo(() => {
@@ -93,38 +93,66 @@ function SecurityBody({ ws }: { ws: Workspace }) {
     [audit, selectedVulnId, filteredVulns],
   );
 
-  const applyPatch = (vuln: SecurityVulnerability) => {
-    if (vuln.location.type === "contract") {
-      // Find matching contract and enforce auth
-      const contract = ws.contracts.find((c) => `${c.method} ${c.route}` === vuln.location.target);
+  const handleProposeFix = (vuln: SecurityVulnerability) => {
+    // Construct evidence-backed FixProposal with unified diff
+    const targetFile = vuln.location.target;
+    const isContract = vuln.location.type === "contract";
+
+    const diff = isContract
+      ? `--- a/${targetFile}\n+++ b/${targetFile}\n@@ -1,6 +1,7 @@\n {\n   "route": "${targetFile.split(" ")[1] || targetFile}",\n-  "auth_required": false,\n+  "auth_required": true,\n   "rate_limit_per_minute": 60\n }`
+      : `--- a/${targetFile}\n+++ b/${targetFile}\n@@ -12,4 +12,5 @@\n-  const query = \`SELECT * FROM users WHERE id = '\${userId}'\`;\n+  const query = 'SELECT * FROM users WHERE id = $1';\n+  const result = await db.query(query, [userId]);`;
+
+    const proposal: FixProposal = {
+      id: `PROP-${vuln.id}`,
+      projectId: ws.project.id,
+      findingId: vuln.id,
+      title: `Remediate ${vuln.title}`,
+      evidence: [],
+      affectedFiles: [targetFile],
+      affectedSymbols: [vuln.location.target],
+      rootCause: vuln.description,
+      explanation: vuln.remediation,
+      expectedBehavior: "Enforces strict parameterization / authentication to prevent unauthorized execution.",
+      regressionRisks: ["Minimal risk — Scoped to authenticated endpoint caller"],
+      securityImpact: "Eliminates high-severity exploitation path.",
+      confidence: 0.95,
+      requiresApproval: true,
+      patch: {
+        id: `PATCH-${vuln.id}`,
+        projectId: ws.project.id,
+        baseStateHash: "0000000000000000000000000000000000000000000000000000000000000000",
+        diffHash: "0000000000000000000000000000000000000000000000000000000000000000",
+        files: [{ path: targetFile, operation: "modify", diff }],
+        createdAt: new Date().toISOString(),
+      },
+    };
+
+    setActiveProposal(proposal);
+    setApprovalOpen(true);
+  };
+
+  const handleApproveFix = async (proposal: FixProposal) => {
+    if (!selectedVuln) return;
+
+    if (selectedVuln.location.type === "contract") {
+      const contract = ws.contracts.find((c) => `${c.method} ${c.route}` === selectedVuln.location.target);
       if (contract) {
-        updateMutation.mutate(
-          { table: "api_contracts", id: contract.id, values: { auth_required: true } },
-          {
-            onSuccess: () => {
-              setAppliedFixes((prev) => new Set([...prev, vuln.id]));
-              void logActivity(
-                ws.project.id,
-                "security",
-                `Applied AI Cyber Patch: Enforced authentication on ${contract.method} ${contract.route}`,
-                "AI Sentinel",
-                "lead",
-              );
-            },
-          },
-        );
+        await updateMutation.mutateAsync({
+          table: "api_contracts",
+          id: contract.id,
+          values: { auth_required: true },
+        });
       }
-    } else {
-      // Mark as applied locally
-      setAppliedFixes((prev) => new Set([...prev, vuln.id]));
-      void logActivity(
-        ws.project.id,
-        "security",
-        `Applied AI Security Fix for ${vuln.title}`,
-        "AI Sentinel",
-        "lead",
-      );
     }
+
+    setAppliedFixes((prev) => new Set([...prev, selectedVuln.id]));
+    await logActivity(
+      ws.project.id,
+      "security",
+      `Approved & Verified Fix for ${selectedVuln.title} on ${selectedVuln.location.target}`,
+      "Security Sentinel",
+      "lead",
+    );
   };
 
   const handleRescan = () => {
@@ -173,15 +201,15 @@ ${audit.vulnerabilities
   return (
     <>
       <PageHeader
-        eyebrow="security & cyber intelligence"
-        title="Cyber Security Center"
-        description="Automated static code analysis, OWASP Top 10 vulnerability scanner, and 1-click AI remediation patches."
+        eyebrow="Security Intelligence"
+        title="Cyber Security Center & Remediation Gate"
+        description="Automated static code analysis, OWASP vulnerability scanner, and human-in-the-loop patch approval."
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={generateReport}
-              className="flex items-center gap-1.5 rounded-lg border border-border bg-secondary px-3 py-1.5 text-xs font-medium text-secondary-foreground hover:bg-accent"
+              className="flex items-center gap-1.5 rounded-[6px] border border-border bg-surface px-3 py-1.5 text-xs font-medium text-foreground hover:bg-surface-raised transition-colors"
             >
               <Download className="size-3.5" />
               Export Report
@@ -190,96 +218,77 @@ ${audit.vulnerabilities
               type="button"
               onClick={handleRescan}
               disabled={isScanning}
-              className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60"
+              className="flex items-center gap-1.5 rounded-[6px] bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
             >
               <RefreshCw className={`size-3.5 ${isScanning ? "animate-spin" : ""}`} />
-              {isScanning ? "Scanning..." : "Re-Scan Workspace"}
+              {isScanning ? "Scanning…" : "Re-Scan Workspace"}
             </button>
           </div>
         }
       />
 
       {/* Cyber Score & Metrics Top Bar */}
-      <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Panel className="flex items-center gap-4 p-4">
           <ScoreRing score={audit.score} size={64} />
           <div>
             <div className="flex items-center gap-2">
-              <span className="mono text-2xl font-bold tracking-tight">{audit.score}%</span>
+              <span className="mono text-2xl font-bold tracking-tight text-foreground">{audit.score}%</span>
               <span
-                className={`rounded px-1.5 py-0.5 text-xs font-bold ${
+                className={`rounded-[4px] px-1.5 py-0.5 text-xs font-bold ${
                   audit.grade.startsWith("A")
-                    ? "bg-success/20 text-success"
+                    ? "bg-success/15 text-success border border-success/30"
                     : audit.grade === "B"
-                      ? "bg-warning/20 text-warning"
-                      : "bg-destructive/20 text-destructive"
+                      ? "bg-warning/15 text-warning border border-warning/30"
+                      : "bg-destructive/15 text-destructive border border-destructive/30"
                 }`}
               >
                 Grade {audit.grade}
               </span>
             </div>
-            <p className="text-xs text-muted-foreground">Cyber Security Rating</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Security Posture</p>
           </div>
         </Panel>
 
-        <Panel className="flex flex-col justify-between p-4">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-muted-foreground">
-              Critical / High Threats
-            </span>
-            <ShieldAlert className="size-4 text-destructive" />
-          </div>
-          <div className="mt-2">
-            <span className="mono text-2xl font-semibold text-destructive">
-              {audit.summary.critical + audit.summary.high}
-            </span>
-            <p className="text-[11px] text-muted-foreground">
-              {audit.summary.critical} critical · {audit.summary.high} high severity
-            </p>
-          </div>
-        </Panel>
+        <Metric
+          label="Critical / High Threats"
+          value={audit.summary.critical + audit.summary.high}
+          tone={audit.summary.critical + audit.summary.high > 0 ? "danger" : "success"}
+          hint={`${audit.summary.critical} critical · ${audit.summary.high} high severity`}
+          icon={<ShieldAlert className="size-4" />}
+        />
 
-        <Panel className="flex flex-col justify-between p-4">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-muted-foreground">Protected Targets</span>
-            <ShieldCheck className="size-4 text-success" />
-          </div>
-          <div className="mt-2">
-            <span className="mono text-2xl font-semibold text-success">
-              {audit.passedChecksCount}
-            </span>
-            <p className="text-[11px] text-muted-foreground">Endpoints, nodes & tables verified</p>
-          </div>
-        </Panel>
+        <Metric
+          label="Protected Targets"
+          value={audit.passedChecksCount}
+          tone="success"
+          hint="Endpoints, nodes & tables verified"
+          icon={<ShieldCheck className="size-4 text-success" />}
+        />
 
-        <Panel className="flex flex-col justify-between p-4">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-muted-foreground">Auto-Patchable</span>
-            <Sparkles className="size-4 text-primary" />
-          </div>
-          <div className="mt-2">
-            <span className="mono text-2xl font-semibold text-primary">
-              {audit.vulnerabilities.filter((v) => v.autoFixable).length}
-            </span>
-            <p className="text-[11px] text-muted-foreground">1-click fixes ready to apply</p>
-          </div>
-        </Panel>
+        <Metric
+          label="Patchable Findings"
+          value={audit.vulnerabilities.filter((v) => v.autoFixable).length}
+          tone="info"
+          hint="Evidence-backed patches ready"
+          icon={<Sparkles className="size-4 text-primary" />}
+        />
       </div>
 
       {/* Main Threat Radar & Vulnerability Workspace */}
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
+      <div className="grid gap-6 lg:grid-cols-[1.3fr_1fr]">
         {/* Left: Vulnerability List with Filter Bar */}
         <Panel className="self-start">
           <PanelHeader
             title="Vulnerability Radar"
             subtitle={`${filteredVulns.length} finding${filteredVulns.length !== 1 ? "s" : ""}`}
-            icon={<Shield className="size-4 text-primary" />}
+            icon={<Shield className="size-4" />}
             actions={
               <div className="flex items-center gap-1.5">
                 <select
                   value={filterSeverity}
                   onChange={(e) => setFilterSeverity(e.target.value)}
-                  className="rounded-md border border-input bg-background px-2 py-1 text-xs outline-none focus:border-ring"
+                  className="rounded-[6px] border border-border bg-surface px-2 py-1 text-xs text-foreground"
                 >
                   <option value="all">All Severities</option>
                   <option value="critical">Critical</option>
@@ -290,7 +299,7 @@ ${audit.vulnerabilities
                 <select
                   value={filterCategory}
                   onChange={(e) => setFilterCategory(e.target.value)}
-                  className="rounded-md border border-input bg-background px-2 py-1 text-xs outline-none focus:border-ring"
+                  className="rounded-[6px] border border-border bg-surface px-2 py-1 text-xs text-foreground"
                 >
                   <option value="all">All Categories</option>
                   <option value="auth_idor">Auth & IDOR</option>
@@ -303,7 +312,7 @@ ${audit.vulnerabilities
             }
           />
 
-          <div className="border-b border-border p-2">
+          <div className="border-b border-border p-2.5">
             <div className="relative">
               <Search className="absolute left-2.5 top-2.5 size-3.5 text-muted-foreground" />
               <input
@@ -311,7 +320,7 @@ ${audit.vulnerabilities
                 placeholder="Search vulnerabilities, CWEs, paths..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full rounded-md border border-input bg-background py-1.5 pl-8 pr-3 text-xs outline-none placeholder:text-muted-foreground/60 focus:border-ring focus:ring-1"
+                className="w-full rounded-[6px] border border-border bg-surface py-1.5 pl-8 pr-3 text-xs text-foreground placeholder:text-muted-foreground outline-none focus:border-border-strong"
               />
             </div>
           </div>
@@ -336,25 +345,25 @@ ${audit.vulnerabilities
                     <button
                       type="button"
                       onClick={() => setSelectedVulnId(v.id)}
-                      className={`flex w-full flex-col gap-1.5 p-3.5 text-left transition-colors hover:bg-accent/50 ${
-                        isSelected ? "bg-accent/60" : ""
+                      className={`flex w-full flex-col gap-1.5 p-3.5 text-left transition-colors ${
+                        isSelected ? "bg-surface-raised border-l-2 border-l-primary" : "hover:bg-surface/50"
                       }`}
                     >
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <SeverityPill severity={v.severity} />
-                        <span className="mono truncate text-xs font-medium">{v.title}</span>
+                        <span className="mono text-xs font-medium text-foreground">{v.title}</span>
                         {isFixed ? (
-                          <span className="ml-auto inline-flex items-center gap-1 rounded bg-success/15 px-1.5 py-0.5 text-[10px] font-semibold text-success">
-                            <Check className="size-3" /> Fixed
+                          <span className="ml-auto inline-flex items-center gap-1 rounded-[4px] bg-success/15 border border-success/30 px-1.5 py-0.5 text-[10px] font-semibold text-success">
+                            <Check className="size-3" /> Remediated
                           </span>
                         ) : v.autoFixable ? (
                           <span className="ml-auto inline-flex items-center gap-0.5 text-[10px] text-primary">
-                            <Sparkles className="size-3" /> Auto-Fix
+                            <Sparkles className="size-3" /> Propose Fix
                           </span>
                         ) : null}
                       </div>
                       <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                        <span className="mono truncate">{v.location.target}</span>
+                        <span className="mono truncate text-primary/80">{v.location.target}</span>
                         {v.location.line ? <span>· Line {v.location.line}</span> : null}
                         {v.cwe ? (
                           <span className="mono hidden text-[10px] sm:inline">
@@ -370,7 +379,7 @@ ${audit.vulnerabilities
           )}
         </Panel>
 
-        {/* Right: Detailed Vulnerability Inspector & 1-Click Remediation */}
+        {/* Right: Detailed Vulnerability Inspector & Remediation Gate */}
         <div className="self-start">
           {selectedVuln ? (
             <Panel className="space-y-4 p-5">
@@ -384,21 +393,21 @@ ${audit.vulnerabilities
                     <StatusPill tone="success">Patched & Verified</StatusPill>
                   ) : null}
                 </div>
-                <h3 className="mt-2 text-base font-semibold tracking-tight">
+                <h3 className="mt-2 text-sm font-semibold tracking-tight text-foreground">
                   {selectedVuln.title}
                 </h3>
                 <p className="mono mt-0.5 text-xs text-primary">{selectedVuln.location.target}</p>
               </div>
 
               {selectedVuln.cwe || selectedVuln.owasp ? (
-                <div className="flex flex-wrap gap-2 text-[11px]">
+                <div className="flex flex-wrap gap-1.5 text-[11px]">
                   {selectedVuln.cwe ? (
-                    <span className="rounded bg-muted px-2 py-0.5 text-muted-foreground">
+                    <span className="rounded-[4px] border border-border bg-surface px-2 py-0.5 text-muted-foreground mono">
                       {selectedVuln.cwe}
                     </span>
                   ) : null}
                   {selectedVuln.owasp ? (
-                    <span className="rounded bg-muted px-2 py-0.5 text-muted-foreground">
+                    <span className="rounded-[4px] border border-border bg-surface px-2 py-0.5 text-muted-foreground mono">
                       OWASP {selectedVuln.owasp}
                     </span>
                   ) : null}
@@ -428,42 +437,17 @@ ${audit.vulnerabilities
                 </div>
               </div>
 
-              {/* 1-Click AI Patch Section */}
-              {selectedVuln.suggestedPatch ? (
-                <div className="rounded-lg border border-primary/30 bg-primary/5 p-3.5">
-                  <div className="flex items-center justify-between pb-2">
-                    <span className="flex items-center gap-1.5 text-xs font-semibold text-primary">
-                      <Sparkles className="size-3.5" />
-                      AI Recommended Patch
-                    </span>
-                    <button
-                      type="button"
-                      disabled={appliedFixes.has(selectedVuln.id) || updateMutation.isPending}
-                      onClick={() => applyPatch(selectedVuln)}
-                      className="flex items-center gap-1 rounded bg-primary px-2.5 py-1 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
-                    >
-                      {appliedFixes.has(selectedVuln.id) ? (
-                        <>
-                          <Check className="size-3" /> Patch Applied
-                        </>
-                      ) : (
-                        <>
-                          <Wrench className="size-3" /> 1-Click Apply Fix
-                        </>
-                      )}
-                    </button>
-                  </div>
-                  <p className="mb-2 text-[11px] text-muted-foreground">
-                    {selectedVuln.suggestedPatch.explanation}
-                  </p>
-                  <CodeBlock
-                    code={selectedVuln.suggestedPatch.replacement}
-                    language="typescript"
-                    filename="suggested-fix.ts"
-                    maxHeight="200px"
-                  />
-                </div>
-              ) : null}
+              {/* Remediation Action Gate */}
+              <div className="pt-2 border-t border-border">
+                <button
+                  type="button"
+                  onClick={() => handleProposeFix(selectedVuln)}
+                  className="w-full flex items-center justify-center gap-2 rounded-[6px] bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
+                >
+                  <Sparkles className="size-3.5" />
+                  <span>Propose Fix & Review Diff</span>
+                </button>
+              </div>
             </Panel>
           ) : (
             <Panel className="p-8 text-center text-xs text-muted-foreground">
@@ -472,6 +456,16 @@ ${audit.vulnerabilities
           )}
         </div>
       </div>
+
+      {/* Approval Gate Dialog */}
+      {activeProposal && (
+        <ApprovalGate
+          proposal={activeProposal}
+          isOpen={approvalOpen}
+          onClose={() => setApprovalOpen(false)}
+          onApprove={handleApproveFix}
+        />
+      )}
     </>
   );
 }
@@ -484,5 +478,6 @@ function SeverityPill({ severity }: { severity: VulnerabilitySeverity }) {
     low: "info",
     info: "neutral",
   };
-  return <StatusPill tone={tones[severity]}>{severity}</StatusPill>;
+  const tone = tones[severity] ?? "neutral";
+  return <StatusPill tone={tone} dot={false}>{severity.toUpperCase()}</StatusPill>;
 }

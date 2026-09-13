@@ -72,7 +72,7 @@ export function AiCopilotModal({
 }: {
   isOpen: boolean;
   onClose: () => void;
-  workspace?: Workspace | null;
+  workspace?: Workspace | null | undefined;
 }) {
   const { data: hookWs } = useWorkspace();
   const ws = workspace ?? hookWs;
@@ -94,14 +94,13 @@ export function AiCopilotModal({
       id: "welcome",
       role: "assistant",
       timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      content: `👋 **Hi! I am your HackSync AI Code Intelligence & Cyber Security Copilot.**
+      content: `**HackSync Engineering Intelligence Copilot**
 
-I have direct access to your repository structure, database schema, and live integration state. Ask me to:
-- 🛡️ Run cyber security audits & find vulnerabilities
-- 🐛 Detect bugs in specific files with debugging steps
-- 🔄 Explain code constructs (e.g. why \`for\` vs \`while\` loop) & transform syntax
-- ⚡ Suggest code optimizations & performance improvements
-- 💬 Answer any custom programming, architecture, or algorithmic question!`,
+Direct index of repository AST symbols, API contracts, PostgreSQL schemas, and security rules.
+- **Audit**: Detect vulnerabilities, hardcoded secrets, and SQL injection paths
+- **Analyze**: Explain call hierarchies, AST dependencies, and cross-file callers
+- **Remediate**: Generate scoped fix proposals with minimal unified diffs
+- **Verify**: Formulate targeted unit and integration test plans with 0 regressions`,
     },
   ]);
   const [input, setInput] = useState("");
@@ -538,13 +537,13 @@ REQUIREMENTS:
         ) : null}
 
         {/* Quick Preset Buttons */}
-        <div className="flex flex-wrap gap-1.5 border-b border-border bg-muted/40 px-4 py-2 shrink-0">
+        <div className="flex flex-wrap gap-1.5 border-b border-border bg-surface px-4 py-2 shrink-0">
           {PRESET_PROMPTS.map((p, idx) => (
             <button
               key={idx}
               type="button"
               onClick={() => handleSend(p.prompt)}
-              className="flex items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+              className="flex items-center gap-1.5 rounded-[6px] border border-border bg-surface px-2.5 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:border-border-strong hover:bg-surface-raised hover:text-foreground"
             >
               <p.icon className="size-3 text-primary" />
               {p.label}
@@ -560,13 +559,13 @@ REQUIREMENTS:
               className={cn("flex gap-3", m.role === "user" ? "justify-end" : "justify-start")}
             >
               {m.role !== "user" ? (
-                <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg bg-primary/15 text-primary">
+                <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-[6px] bg-surface-raised border border-border text-primary">
                   <Bot className="size-4" />
                 </span>
               ) : null}
               <div
                 className={cn(
-                  "max-w-[88%] sm:max-w-[82%] rounded-xl p-4 leading-relaxed",
+                  "max-w-[88%] sm:max-w-[82%] rounded-[8px] p-4 leading-relaxed",
                   m.role === "user"
                     ? "bg-primary text-primary-foreground font-medium"
                     : "border border-border bg-surface text-foreground shadow-sm",
@@ -575,22 +574,22 @@ REQUIREMENTS:
                 {/* Assistant Capability Tag */}
                 {m.role !== "user" && m.intent && (
                   <div className="mb-2">
-                    <span className="inline-flex items-center gap-1 rounded bg-primary/15 px-2 py-0.5 text-[10px] font-mono font-bold uppercase text-primary border border-primary/25">
-                      ⚡ Capability: {m.intent}
+                    <span className="inline-flex items-center gap-1 rounded-[4px] bg-surface-raised px-2 py-0.5 text-[10px] font-mono font-medium uppercase text-primary border border-border">
+                      Capability: {m.intent}
                     </span>
                   </div>
                 )}
 
                 {/* Tool Execution Trace */}
                 {m.role !== "user" && m.toolCalls && m.toolCalls.length > 0 && (
-                  <div className="mb-2.5 flex flex-wrap items-center gap-1.5 rounded-md bg-muted/60 p-2 text-[10px] border border-border">
+                  <div className="mb-2.5 flex flex-wrap items-center gap-1.5 rounded-[6px] bg-surface-raised p-2 text-[10px] border border-border">
                     <span className="font-semibold text-foreground flex items-center gap-1 shrink-0">
                       <Wrench className="size-3 text-primary" /> Tools:
                     </span>
                     {m.toolCalls.map((t, tidx) => (
                       <span
                         key={tidx}
-                        className="rounded bg-background px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground border border-border"
+                        className="rounded-[4px] bg-surface px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground border border-border"
                         title={t.summary}
                       >
                         <span className="font-semibold text-foreground">{t.name}</span> ({t.summary})
@@ -725,13 +724,13 @@ REQUIREMENTS:
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask anything about your code, bugs, loops, cyber security, architecture, or any programming topic..."
-              className="flex-1 rounded-lg border border-input bg-background px-3.5 py-2.5 text-xs outline-none transition-colors placeholder:text-muted-foreground/60 focus:border-ring focus:ring-2 focus:ring-ring/30"
+              placeholder="Ask anything about your code, AST symbols, security vulnerabilities, or test plans..."
+              className="flex-1 rounded-[6px] border border-border bg-background px-3.5 py-2 text-xs text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-border-strong"
             />
             <button
               type="submit"
               disabled={!input.trim() || isThinking}
-              className="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+              className="flex items-center gap-1.5 rounded-[6px] bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
             >
               <Send className="size-3.5" />
               <span className="hidden sm:inline">Send</span>

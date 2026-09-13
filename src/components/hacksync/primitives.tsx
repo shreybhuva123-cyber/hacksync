@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { Check, Copy, Loader2 } from "lucide-react";
+import { Check, Copy, Loader2, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /* ---------------- Panel ---------------- */
@@ -24,7 +24,7 @@ export function PanelHeader({
       <div className="flex min-w-0 items-center gap-2.5">
         {icon ? <span className="text-primary">{icon}</span> : null}
         <div className="min-w-0">
-          <h2 className="truncate text-sm font-semibold tracking-tight">{title}</h2>
+          <h2 className="truncate text-sm font-semibold tracking-tight text-foreground">{title}</h2>
           {subtitle ? <p className="truncate text-xs text-muted-foreground">{subtitle}</p> : null}
         </div>
       </div>
@@ -48,11 +48,11 @@ export function PageHeader({
     <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
       <div>
         {eyebrow ? (
-          <p className="mono text-[11px] uppercase tracking-[0.18em] text-primary">{eyebrow}</p>
+          <p className="mono text-[11px] uppercase tracking-[0.14em] text-primary font-medium">{eyebrow}</p>
         ) : null}
-        <h1 className="mt-1 text-2xl font-semibold tracking-tight">{title}</h1>
+        <h1 className="mt-1 text-xl font-semibold tracking-tight text-foreground sm:text-2xl">{title}</h1>
         {description ? (
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{description}</p>
+          <p className="mt-1 max-w-3xl text-xs text-muted-foreground leading-relaxed sm:text-sm">{description}</p>
         ) : null}
       </div>
       {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
@@ -65,12 +65,12 @@ export function PageHeader({
 export type Tone = "success" | "warning" | "danger" | "info" | "neutral" | "primary";
 
 const toneClass: Record<Tone, string> = {
-  success: "bg-success/12 text-success border-success/30",
-  warning: "bg-warning/12 text-warning border-warning/30",
-  danger: "bg-destructive/12 text-destructive border-destructive/35",
-  info: "bg-info/12 text-info border-info/30",
-  primary: "bg-primary/12 text-primary border-primary/30",
-  neutral: "bg-muted text-muted-foreground border-border",
+  success: "bg-success/10 text-success border-success/30",
+  warning: "bg-warning/10 text-warning border-warning/30",
+  danger: "bg-destructive/10 text-destructive border-destructive/30",
+  info: "bg-info/10 text-info border-info/30",
+  primary: "bg-primary/10 text-primary border-primary/30",
+  neutral: "bg-surface-raised text-muted-foreground border-border",
 };
 
 export function StatusPill({
@@ -87,7 +87,7 @@ export function StatusPill({
   return (
     <span
       className={cn(
-        "mono inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium whitespace-nowrap",
+        "mono inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium whitespace-nowrap",
         toneClass[tone],
         className,
       )}
@@ -99,7 +99,7 @@ export function StatusPill({
 }
 
 export function statusTone(status: string): Tone {
-  switch (status) {
+  switch (status?.toLowerCase()) {
     case "pass":
     case "passing":
     case "healthy":
@@ -108,13 +108,18 @@ export function statusTone(status: string): Tone {
     case "done":
     case "clean":
     case "merged":
+    case "verified":
+    case "none":
       return "success";
     case "warn":
+    case "warning":
     case "pending":
     case "in_progress":
     case "review":
     case "untested":
     case "planned":
+    case "medium":
+    case "low":
       return "warning";
     case "fail":
     case "failing":
@@ -123,25 +128,31 @@ export function statusTone(status: string): Tone {
     case "conflict":
     case "drifted":
     case "critical":
+    case "critical_regression":
+    case "regression":
+    case "high":
       return "danger";
+    case "info":
+    case "running":
+      return "info";
     default:
       return "neutral";
   }
 }
 
 export const roleClass: Record<string, string> = {
-  frontend: "text-frontend border-frontend/35 bg-frontend/10",
-  backend: "text-backend border-backend/35 bg-backend/10",
-  database: "text-database border-database/35 bg-database/10",
-  lead: "text-lead border-lead/35 bg-lead/10",
-  shared: "text-muted-foreground border-border bg-muted",
+  frontend: "text-frontend border-frontend/30 bg-frontend/10",
+  backend: "text-backend border-backend/30 bg-backend/10",
+  database: "text-database border-database/30 bg-database/10",
+  lead: "text-lead border-lead/30 bg-lead/10",
+  shared: "text-muted-foreground border-border bg-surface",
 };
 
 export function RoleBadge({ role, className }: { role: string; className?: string }) {
   return (
     <span
       className={cn(
-        "mono inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wider",
+        "mono inline-flex items-center rounded-[4px] border px-1.5 py-0.5 text-[10px] uppercase tracking-wider font-medium",
         roleClass[role] ?? roleClass["shared"],
         className,
       )}
@@ -161,7 +172,7 @@ export function MethodBadge({ method }: { method: string }) {
           ? "danger"
           : "warning";
   return (
-    <StatusPill tone={tone} dot={false} className="rounded px-1.5 font-semibold">
+    <StatusPill tone={tone} dot={false} className="rounded-[4px] px-1.5 font-semibold">
       {method}
     </StatusPill>
   );
@@ -185,12 +196,12 @@ export function Metric({
   return (
     <Panel className="p-4">
       <div className="flex items-start justify-between gap-2">
-        <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{label}</p>
+        <p className="text-[11px] font-medium tracking-wider text-muted-foreground uppercase">{label}</p>
         {icon ? (
-          <span className={cn("opacity-70", toneClass[tone].split(" ")[1])}>{icon}</span>
+          <span className={cn("opacity-80", toneClass[tone].split(" ")[1])}>{icon}</span>
         ) : null}
       </div>
-      <p className="mono mt-2 text-2xl font-semibold tabular-nums">{value}</p>
+      <p className="mono mt-2 text-2xl font-semibold tabular-nums text-foreground">{value}</p>
       {hint ? <p className="mt-1 text-xs text-muted-foreground">{hint}</p> : null}
     </Panel>
   );
@@ -218,7 +229,7 @@ export function CopyButton({
         });
       }}
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-md border border-border bg-secondary px-2 py-1 text-xs font-medium text-secondary-foreground transition-colors hover:border-border-strong hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+        "inline-flex items-center gap-1.5 rounded-[6px] border border-border bg-surface px-2 py-1 text-xs font-medium text-foreground transition-colors hover:border-border-strong hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
         className,
       )}
       aria-label={copied ? "Copied" : label}
@@ -243,7 +254,7 @@ export function CodeBlock({
   maxHeight?: string;
 }) {
   return (
-    <div className={cn("overflow-hidden rounded-lg border border-border bg-background", className)}>
+    <div className={cn("overflow-hidden rounded-[8px] border border-border bg-background", className)}>
       <div className="flex items-center justify-between border-b border-border bg-surface px-3 py-1.5">
         <span className="mono truncate text-[11px] text-muted-foreground">
           {filename ?? language ?? "snippet"}
@@ -266,7 +277,7 @@ export function LoadingState({ label = "Loading workspace…" }: { label?: strin
   return (
     <div className="flex min-h-60 flex-col items-center justify-center gap-3 text-muted-foreground">
       <Loader2 className="size-5 animate-spin text-primary" />
-      <p className="text-sm">{label}</p>
+      <p className="text-xs">{label}</p>
     </div>
   );
 }
@@ -275,16 +286,19 @@ export function EmptyState({
   title,
   description,
   action,
+  icon,
 }: {
   title: string;
   description?: string;
   action?: ReactNode;
+  icon?: ReactNode;
 }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border px-6 py-10 text-center">
-      <p className="text-sm font-medium">{title}</p>
-      {description ? <p className="max-w-md text-xs text-muted-foreground">{description}</p> : null}
-      {action}
+    <div className="flex flex-col items-center justify-center gap-2.5 rounded-[8px] border border-dashed border-border bg-surface/30 px-6 py-12 text-center">
+      {icon ? <div className="text-muted-foreground mb-1">{icon}</div> : null}
+      <p className="text-sm font-semibold text-foreground">{title}</p>
+      {description ? <p className="max-w-md text-xs text-muted-foreground leading-relaxed">{description}</p> : null}
+      {action ? <div className="mt-2">{action}</div> : null}
     </div>
   );
 }
@@ -296,25 +310,26 @@ export function ErrorState({ message, onRetry }: { message: string; onRetry?: ()
     message.toLowerCase().includes("public.projects");
 
   return (
-    <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-5">
+    <div className="rounded-[8px] border border-destructive/30 bg-destructive/5 p-4 sm:p-5">
       <div className="flex items-center gap-2">
+        <AlertCircle className="size-4 text-destructive shrink-0" />
         <p className="text-sm font-semibold text-destructive">
-          {isMissingTable ? "Database Schema Initialization Required" : "Something went wrong"}
+          {isMissingTable ? "Database Schema Initialization Required" : "Operation Error"}
         </p>
       </div>
-      <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
+      <p className="mt-1.5 text-xs text-muted-foreground leading-relaxed">
         {isMissingTable
           ? "Your Supabase project is connected, but the database tables have not been created yet in PostgreSQL. Run the SQL setup script in your Supabase SQL Editor to create all tables and RPC functions in 1 click."
           : message}
       </p>
 
-      <div className="mt-4 flex items-center gap-3 flex-wrap">
+      <div className="mt-4 flex items-center gap-2.5 flex-wrap">
         {isMissingTable ? (
           <a
             href="https://supabase.com/dashboard/project/qqyecjwhyjyryqykhcxa/sql"
             target="_blank"
             rel="noreferrer"
-            className="rounded-lg bg-primary px-3.5 py-1.5 text-xs font-semibold text-primary-foreground hover:opacity-90 transition-opacity shadow-sm flex items-center gap-1.5"
+            className="rounded-[6px] bg-primary px-3.5 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors shadow-sm flex items-center gap-1.5"
           >
             Open Supabase SQL Editor ↗
           </a>
@@ -323,9 +338,9 @@ export function ErrorState({ message, onRetry }: { message: string; onRetry?: ()
           <button
             type="button"
             onClick={onRetry}
-            className="rounded-lg border border-border bg-secondary px-3.5 py-1.5 text-xs font-medium hover:bg-accent transition-colors"
+            className="rounded-[6px] border border-border bg-surface px-3.5 py-1.5 text-xs font-medium text-foreground hover:bg-surface-raised transition-colors"
           >
-            Retry Connection
+            Retry
           </button>
         ) : null}
       </div>
@@ -337,18 +352,18 @@ export function ErrorState({ message, onRetry }: { message: string; onRetry?: ()
 
 export function ScoreRing({
   score,
-  size = 148,
+  size = 140,
   label = "Integration Readiness",
 }: {
   score: number;
   size?: number;
   label?: string;
 }) {
-  const stroke = 10;
+  const stroke = 8;
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
   const tone =
-    score >= 90 ? "var(--success)" : score >= 70 ? "var(--warning)" : "var(--destructive)";
+    score >= 90 ? "var(--color-success)" : score >= 70 ? "var(--color-warning)" : "var(--color-destructive)";
   return (
     <div className="flex flex-col items-center gap-2">
       <div className="relative" style={{ width: size, height: size }}>
@@ -364,7 +379,7 @@ export function ScoreRing({
             cy={size / 2}
             r={r}
             fill="none"
-            stroke="var(--border)"
+            stroke="var(--color-border)"
             strokeWidth={stroke}
           />
           <circle
@@ -381,8 +396,8 @@ export function ScoreRing({
           />
         </svg>
         <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <span className="mono text-3xl font-semibold tabular-nums">{score}%</span>
-          <span className="text-[10px] tracking-wide text-muted-foreground uppercase">ready</span>
+          <span className="mono text-3xl font-semibold tabular-nums text-foreground">{score}%</span>
+          <span className="text-[10px] tracking-wider text-muted-foreground uppercase font-medium">score</span>
         </div>
       </div>
       <p className="text-xs font-medium text-muted-foreground">{label}</p>
@@ -400,7 +415,7 @@ export function Bar({ value, tone = "primary" }: { value: number; tone?: Tone })
           ? "bg-destructive"
           : "bg-primary";
   return (
-    <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+    <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-raised">
       <div
         className={cn("h-full rounded-full transition-[width] duration-500", bg)}
         style={{ width: `${Math.min(100, Math.max(0, value))}%` }}

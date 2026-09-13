@@ -19,6 +19,7 @@ import { Route as AuthenticatedArchitectureRouteImport } from './routes/_authent
 import { Route as AuthenticatedCodeRouteImport } from './routes/_authenticated/code'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
 import { Route as AuthenticatedEnvRouteImport } from './routes/_authenticated/env'
+import { Route as AuthenticatedEvaluationRouteImport } from './routes/_authenticated/evaluation'
 import { Route as AuthenticatedGitRouteImport } from './routes/_authenticated/git'
 import { Route as AuthenticatedHandoffsRouteImport } from './routes/_authenticated/handoffs'
 import { Route as AuthenticatedHealthRouteImport } from './routes/_authenticated/health'
@@ -32,6 +33,7 @@ import { Route as AuthenticatedSecurityRouteImport } from './routes/_authenticat
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
 import { Route as AuthenticatedSetupRouteImport } from './routes/_authenticated/setup'
 import { Route as AuthenticatedTasksRouteImport } from './routes/_authenticated/tasks'
+import { Route as AuthenticatedTestingRouteImport } from './routes/_authenticated/testing'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -81,6 +83,11 @@ const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
 const AuthenticatedEnvRoute = AuthenticatedEnvRouteImport.update({
   id: '/env',
   path: '/env',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedEvaluationRoute = AuthenticatedEvaluationRouteImport.update({
+  id: '/evaluation',
+  path: '/evaluation',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedGitRoute = AuthenticatedGitRouteImport.update({
@@ -150,6 +157,11 @@ const AuthenticatedTasksRoute = AuthenticatedTasksRouteImport.update({
   path: '/tasks',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedTestingRoute = AuthenticatedTestingRouteImport.update({
+  id: '/testing',
+  path: '/testing',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -161,6 +173,7 @@ export interface FileRoutesByFullPath {
   '/code': typeof AuthenticatedCodeRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/env': typeof AuthenticatedEnvRoute
+  '/evaluation': typeof AuthenticatedEvaluationRoute
   '/git': typeof AuthenticatedGitRoute
   '/handoffs': typeof AuthenticatedHandoffsRoute
   '/health': typeof AuthenticatedHealthRoute
@@ -174,6 +187,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof AuthenticatedSettingsRoute
   '/setup': typeof AuthenticatedSetupRoute
   '/tasks': typeof AuthenticatedTasksRoute
+  '/testing': typeof AuthenticatedTestingRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -185,6 +199,7 @@ export interface FileRoutesByTo {
   '/code': typeof AuthenticatedCodeRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/env': typeof AuthenticatedEnvRoute
+  '/evaluation': typeof AuthenticatedEvaluationRoute
   '/git': typeof AuthenticatedGitRoute
   '/handoffs': typeof AuthenticatedHandoffsRoute
   '/health': typeof AuthenticatedHealthRoute
@@ -198,6 +213,7 @@ export interface FileRoutesByTo {
   '/settings': typeof AuthenticatedSettingsRoute
   '/setup': typeof AuthenticatedSetupRoute
   '/tasks': typeof AuthenticatedTasksRoute
+  '/testing': typeof AuthenticatedTestingRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -211,6 +227,7 @@ export interface FileRoutesById {
   '/_authenticated/code': typeof AuthenticatedCodeRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
   '/_authenticated/env': typeof AuthenticatedEnvRoute
+  '/_authenticated/evaluation': typeof AuthenticatedEvaluationRoute
   '/_authenticated/git': typeof AuthenticatedGitRoute
   '/_authenticated/handoffs': typeof AuthenticatedHandoffsRoute
   '/_authenticated/health': typeof AuthenticatedHealthRoute
@@ -224,6 +241,7 @@ export interface FileRoutesById {
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
   '/_authenticated/setup': typeof AuthenticatedSetupRoute
   '/_authenticated/tasks': typeof AuthenticatedTasksRoute
+  '/_authenticated/testing': typeof AuthenticatedTestingRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -237,6 +255,7 @@ export interface FileRouteTypes {
     | '/code'
     | '/dashboard'
     | '/env'
+    | '/evaluation'
     | '/git'
     | '/handoffs'
     | '/health'
@@ -250,6 +269,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/setup'
     | '/tasks'
+    | '/testing'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -261,6 +281,7 @@ export interface FileRouteTypes {
     | '/code'
     | '/dashboard'
     | '/env'
+    | '/evaluation'
     | '/git'
     | '/handoffs'
     | '/health'
@@ -274,6 +295,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/setup'
     | '/tasks'
+    | '/testing'
   id:
     | '__root__'
     | '/'
@@ -286,6 +308,7 @@ export interface FileRouteTypes {
     | '/_authenticated/code'
     | '/_authenticated/dashboard'
     | '/_authenticated/env'
+    | '/_authenticated/evaluation'
     | '/_authenticated/git'
     | '/_authenticated/handoffs'
     | '/_authenticated/health'
@@ -299,6 +322,7 @@ export interface FileRouteTypes {
     | '/_authenticated/settings'
     | '/_authenticated/setup'
     | '/_authenticated/tasks'
+    | '/_authenticated/testing'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -378,6 +402,13 @@ declare module '@tanstack/react-router' {
       path: '/env'
       fullPath: '/env'
       preLoaderRoute: typeof AuthenticatedEnvRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/evaluation': {
+      id: '/_authenticated/evaluation'
+      path: '/evaluation'
+      fullPath: '/evaluation'
+      preLoaderRoute: typeof AuthenticatedEvaluationRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/git': {
@@ -471,6 +502,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedTasksRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/testing': {
+      id: '/_authenticated/testing'
+      path: '/testing'
+      fullPath: '/testing'
+      preLoaderRoute: typeof AuthenticatedTestingRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
   }
 }
 
@@ -481,6 +519,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedCodeRoute: typeof AuthenticatedCodeRoute
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
   AuthenticatedEnvRoute: typeof AuthenticatedEnvRoute
+  AuthenticatedEvaluationRoute: typeof AuthenticatedEvaluationRoute
   AuthenticatedGitRoute: typeof AuthenticatedGitRoute
   AuthenticatedHandoffsRoute: typeof AuthenticatedHandoffsRoute
   AuthenticatedHealthRoute: typeof AuthenticatedHealthRoute
@@ -494,6 +533,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
   AuthenticatedSetupRoute: typeof AuthenticatedSetupRoute
   AuthenticatedTasksRoute: typeof AuthenticatedTasksRoute
+  AuthenticatedTestingRoute: typeof AuthenticatedTestingRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
@@ -503,6 +543,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedCodeRoute: AuthenticatedCodeRoute,
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
   AuthenticatedEnvRoute: AuthenticatedEnvRoute,
+  AuthenticatedEvaluationRoute: AuthenticatedEvaluationRoute,
   AuthenticatedGitRoute: AuthenticatedGitRoute,
   AuthenticatedHandoffsRoute: AuthenticatedHandoffsRoute,
   AuthenticatedHealthRoute: AuthenticatedHealthRoute,
@@ -516,6 +557,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,
   AuthenticatedSetupRoute: AuthenticatedSetupRoute,
   AuthenticatedTasksRoute: AuthenticatedTasksRoute,
+  AuthenticatedTestingRoute: AuthenticatedTestingRoute,
 }
 
 const AuthenticatedRouteRouteWithChildren =

@@ -8,6 +8,7 @@ import {
   Database,
   FileCode2,
   FolderKanban,
+  Gauge,
   GitBranch,
   Github,
   KeyRound,
@@ -18,12 +19,14 @@ import {
   MonitorPlay,
   Network,
   PlugZap,
+  Search,
   Settings,
   ShieldAlert,
   ShieldCheck,
   Sliders,
   Sparkles,
   Terminal,
+  TestTube2,
   Trophy,
   UserPlus,
   X,
@@ -36,6 +39,7 @@ import { computeReadiness, computeWarnings } from "@/lib/hacksync/analysis";
 import { auditWorkspaceSecurity } from "@/lib/hacksync/ai-security";
 import { RoleBadge, StatusPill } from "./primitives";
 import { AiCopilotModal } from "./AiCopilotModal";
+import { CommandPalette } from "./CommandPalette";
 import { InviteTeammatesModal } from "@/components/projects/InviteTeammatesModal";
 import { TopTimerWidget } from "@/components/timer";
 
@@ -43,7 +47,7 @@ interface NavItem {
   to: string;
   label: string;
   icon: typeof LayoutDashboard;
-  badge?: string | number;
+  badge?: string | number | undefined;
 }
 
 interface NavGroup {
@@ -51,51 +55,10 @@ interface NavGroup {
   items: NavItem[];
 }
 
-const NAV: NavGroup[] = [
-  {
-    group: "Overview",
-    items: [
-      { to: "/dashboard", label: "Cockpit", icon: LayoutDashboard },
-      { to: "/pitch", label: "Judge Pitch & Demo", icon: Trophy },
-      { to: "/security", label: "Cyber Security", icon: ShieldAlert },
-      { to: "/architecture", label: "Architecture Map", icon: Boxes },
-      { to: "/integrations", label: "Integration Map", icon: Network },
-      { to: "/predemo", label: "Pre-Demo Mode", icon: MonitorPlay },
-    ],
-  },
-  {
-    group: "Contracts",
-    items: [
-      { to: "/api", label: "API Contracts", icon: PlugZap },
-      { to: "/schema", label: "Database Schema", icon: Database },
-      { to: "/env", label: "Environment", icon: KeyRound },
-      { to: "/health", label: "Health Center", icon: ShieldCheck },
-    ],
-  },
-  {
-    group: "Code & Git",
-    items: [
-      { to: "/code", label: "Files & Code", icon: FileCode2 },
-      { to: "/git", label: "Git & Branches", icon: GitBranch },
-      { to: "/handoffs", label: "Handoff Cards", icon: Sparkles },
-      { to: "/setup", label: "Setup & Workflow", icon: Terminal },
-    ],
-  },
-  {
-    group: "Team",
-    items: [
-      { to: "/tasks", label: "Tasks", icon: ListChecks },
-      { to: "/activity", label: "Activity Feed", icon: Activity },
-      { to: "/projects", label: "Projects", icon: FolderKanban },
-      { to: "/project-settings", label: "Project Settings", icon: Sliders },
-      { to: "/settings", label: "Settings", icon: Settings },
-    ],
-  },
-];
-
 export function AppShell({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const [copilotOpen, setCopilotOpen] = useState(false);
+  const [commandOpen, setCommandOpen] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const navigate = useNavigate();
@@ -109,11 +72,15 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const cyberAudit = ws ? auditWorkspaceSecurity(ws) : null;
   const cyberThreatsCount = cyberAudit ? cyberAudit.summary.critical + cyberAudit.summary.high : 0;
+  const conflictCount = ws ? ws.branches.filter((b) => b.merge_status === "conflict").length : 0;
 
-  // Keyboard shortcut listener: Cmd/Ctrl + J or Cmd/Ctrl + K opens Copilot
+  // Keyboard shortcut listener: Cmd/Ctrl + J for Copilot, Cmd/Ctrl + K for Command Palette
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && (e.key === "j" || e.key === "k")) {
+      if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
+        e.preventDefault();
+        setCommandOpen((prev) => !prev);
+      } else if ((e.metaKey || e.ctrlKey) && (e.key === "j" || e.key === "J")) {
         e.preventDefault();
         setCopilotOpen((prev) => !prev);
       }
@@ -121,6 +88,46 @@ export function AppShell({ children }: { children: ReactNode }) {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
+
+  const navGroups: NavGroup[] = [
+    {
+      group: "Workspaces",
+      items: [
+        { to: "/dashboard", label: "Overview", icon: LayoutDashboard },
+        { to: "/code", label: "Code Intelligence", icon: FileCode2 },
+        {
+          to: "/security",
+          label: "Security Center",
+          icon: ShieldAlert,
+          badge: cyberThreatsCount > 0 ? cyberThreatsCount : undefined,
+        },
+        {
+          to: "/testing",
+          label: "Testing & Verify",
+          icon: TestTube2,
+          badge: criticalCount > 0 ? criticalCount : undefined,
+        },
+        { to: "/evaluation", label: "Evaluation & Benchmarks", icon: Gauge },
+        {
+          to: "/git",
+          label: "Git Intelligence",
+          icon: GitBranch,
+          badge: conflictCount > 0 ? conflictCount : undefined,
+        },
+        { to: "/settings", label: "Settings", icon: Settings },
+      ],
+    },
+    {
+      group: "Specifications & Maps",
+      items: [
+        { to: "/api", label: "API Contracts", icon: PlugZap },
+        { to: "/schema", label: "Database Schema", icon: Database },
+        { to: "/architecture", label: "Architecture Map", icon: Boxes },
+        { to: "/activity", label: "Activity Log", icon: Activity },
+        { to: "/pitch", label: "Judge Demo Mode", icon: Trophy },
+      ],
+    },
+  ];
 
   return (
     <div className="min-h-screen bg-background">
@@ -132,17 +139,20 @@ export function AppShell({ children }: { children: ReactNode }) {
         )}
       >
         <div className="flex h-14 items-center justify-between border-b border-sidebar-border px-4">
-          <Link to="/dashboard" className="flex items-center gap-2">
-            <span className="grid size-7 place-items-center rounded-md bg-primary/15 text-primary">
+          <Link to="/dashboard" className="flex items-center gap-2.5">
+            <span className="grid size-7 place-items-center rounded-[6px] bg-primary/10 text-primary border border-primary/20">
               <Network className="size-4" />
             </span>
-            <span className="text-sm font-semibold tracking-tight">
-              Hack<span className="text-primary">Sync</span>
-            </span>
+            <div className="flex flex-col">
+              <span className="text-sm font-semibold tracking-tight text-foreground leading-none">
+                Hack<span className="text-primary">Sync</span>
+              </span>
+              <span className="text-[10px] text-muted-foreground mono mt-0.5">engineering platform</span>
+            </div>
           </Link>
           <button
             type="button"
-            className="rounded-md p-1 text-muted-foreground hover:bg-sidebar-accent lg:hidden"
+            className="rounded-[6px] p-1 text-muted-foreground hover:bg-sidebar-accent lg:hidden"
             onClick={() => setOpen(false)}
             aria-label="Close navigation"
           >
@@ -153,10 +163,10 @@ export function AppShell({ children }: { children: ReactNode }) {
         {/* Project Switcher */}
         <ProjectSwitcher />
 
-        <nav className="flex-1 overflow-y-auto px-2 py-3">
-          {NAV.map((section) => (
+        <nav className="flex-1 overflow-y-auto px-2.5 py-3">
+          {navGroups.map((section) => (
             <div key={section.group} className="mb-4">
-              <p className="mono px-2 pb-1.5 text-[10px] tracking-[0.16em] text-muted-foreground uppercase">
+              <p className="mono px-2 pb-1.5 text-[10px] tracking-[0.14em] text-muted-foreground uppercase font-medium">
                 {section.group}
               </p>
               <ul className="space-y-0.5">
@@ -168,24 +178,19 @@ export function AppShell({ children }: { children: ReactNode }) {
                         to={item.to}
                         onClick={() => setOpen(false)}
                         className={cn(
-                          "flex items-center gap-2.5 rounded-md px-2 py-1.5 text-[13px] transition-colors focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-none",
+                          "flex items-center gap-2.5 rounded-[6px] px-2.5 py-1.5 text-[13px] transition-colors focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none",
                           active
-                            ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
-                            : "text-sidebar-foreground/75 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
+                            ? "bg-surface-raised font-medium text-foreground border border-border"
+                            : "text-muted-foreground hover:bg-surface hover:text-foreground",
                         )}
                       >
                         <item.icon
-                          className={cn("size-4", active ? "text-primary" : "opacity-70")}
+                          className={cn("size-4 shrink-0", active ? "text-primary" : "text-muted-foreground")}
                         />
                         <span className="truncate">{item.label}</span>
-                        {item.to === "/health" && criticalCount > 0 ? (
-                          <span className="mono ml-auto rounded bg-destructive/20 px-1.5 text-[10px] text-destructive">
-                            {criticalCount}
-                          </span>
-                        ) : null}
-                        {item.to === "/security" && cyberThreatsCount > 0 ? (
-                          <span className="mono ml-auto rounded bg-destructive/20 px-1.5 text-[10px] text-destructive">
-                            {cyberThreatsCount}
+                        {item.badge !== undefined ? (
+                          <span className="mono ml-auto rounded-[4px] bg-destructive/15 border border-destructive/25 px-1.5 py-0.2 text-[10px] font-semibold text-destructive">
+                            {item.badge}
                           </span>
                         ) : null}
                       </Link>
@@ -198,14 +203,14 @@ export function AppShell({ children }: { children: ReactNode }) {
         </nav>
 
         <div className="border-t border-sidebar-border p-3">
-          <div className="rounded-lg border border-border bg-surface p-3">
+          <div className="rounded-[8px] border border-border bg-surface p-3">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] text-muted-foreground">Readiness</span>
-              <span className="mono text-sm font-semibold tabular-nums">
+              <span className="text-[11px] text-muted-foreground font-medium">Health Score</span>
+              <span className="mono text-sm font-semibold tabular-nums text-foreground">
                 {readiness ? `${readiness.score}%` : "—"}
               </span>
             </div>
-            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-surface-raised">
               <div
                 className={cn(
                   "h-full rounded-full transition-[width] duration-500",
@@ -225,7 +230,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               await signOut();
               void navigate({ to: "/" });
             }}
-            className="mt-3 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+            className="mt-3 flex w-full items-center gap-2 rounded-[6px] px-2.5 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-surface-raised hover:text-foreground"
           >
             <LogOut className="size-4" />
             Sign out
@@ -235,7 +240,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       {open ? (
         <div
-          className="fixed inset-0 z-40 bg-background/70 lg:hidden"
+          className="fixed inset-0 z-40 bg-background/80 backdrop-blur-sm lg:hidden"
           onClick={() => setOpen(false)}
           aria-hidden
         />
@@ -243,31 +248,33 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       {/* Main Content Area */}
       <div className="lg:pl-64">
-        <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-border bg-background/85 px-4 backdrop-blur">
+        <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-border bg-background/90 px-4 backdrop-blur">
           <button
             type="button"
-            className="rounded-md p-1.5 text-muted-foreground hover:bg-accent lg:hidden"
+            className="rounded-[6px] p-1.5 text-muted-foreground hover:bg-surface-raised lg:hidden"
             onClick={() => setOpen(true)}
             aria-label="Open navigation"
           >
             <Menu className="size-4" />
           </button>
 
-          <div className="flex min-w-0 items-center gap-2">
-            <span className="truncate text-sm font-medium">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <span className="truncate text-xs font-semibold text-foreground sm:text-sm">
               {ws?.project.name ?? "Loading workspace…"}
             </span>
-            {ws ? (
-              <StatusPill tone="primary" dot={false} className="hidden sm:inline-flex">
-                schema {ws.project.schema_version}
-              </StatusPill>
-            ) : null}
+
+            {/* Active Git Branch badge */}
+            <div className="hidden sm:flex items-center gap-1.5 rounded-[4px] border border-border bg-surface px-2 py-0.5 text-[11px] mono text-muted-foreground">
+              <GitBranch className="size-3 text-primary" />
+              <span>{ws?.project.default_branch ?? "main"}</span>
+            </div>
+
             {ws?.project.repo_url ? (
               <a
                 href={ws.project.repo_url}
                 target="_blank"
                 rel="noreferrer"
-                className="mono hidden items-center gap-1 text-[11px] text-muted-foreground hover:text-primary md:inline-flex"
+                className="mono hidden items-center gap-1 text-[11px] text-muted-foreground hover:text-primary md:inline-flex transition-colors"
               >
                 <Github className="size-3.5" />
                 {ws.project.repo_url.replace("https://github.com/", "")}
@@ -275,8 +282,22 @@ export function AppShell({ children }: { children: ReactNode }) {
             ) : null}
           </div>
 
-          <div className="ml-auto flex items-center gap-2.5">
-            {/* Hackathon Top Countdown / Stopwatch Timer & Activity History */}
+          <div className="ml-auto flex items-center gap-2">
+            {/* Global Search / Command Palette Shortcut Trigger */}
+            <button
+              type="button"
+              onClick={() => setCommandOpen(true)}
+              className="flex items-center gap-2 rounded-[6px] border border-border bg-surface px-2.5 py-1 text-xs text-muted-foreground hover:border-border-strong hover:text-foreground transition-colors"
+              title="Search or Jump to... (Ctrl+K)"
+            >
+              <Search className="size-3.5" />
+              <span className="hidden md:inline">Search or jump to...</span>
+              <kbd className="mono rounded border border-border bg-surface-raised px-1 py-0.2 text-[10px]">
+                ⌘K
+              </kbd>
+            </button>
+
+            {/* Top Timer Widget */}
             <TopTimerWidget />
 
             {/* Invite Teammates Action Button */}
@@ -284,73 +305,65 @@ export function AppShell({ children }: { children: ReactNode }) {
               <button
                 type="button"
                 onClick={() => setInviteOpen(true)}
-                className="flex items-center gap-1.5 rounded-lg border border-border bg-secondary/80 px-2.5 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-accent"
-                title="Invite Teammates with 1-Click Link or Code"
+                className="flex items-center gap-1.5 rounded-[6px] border border-border bg-surface px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-surface-raised"
+                title="Invite Teammates"
               >
                 <UserPlus className="size-3.5 text-primary" />
-                <span className="hidden sm:inline">Invite Teammates</span>
+                <span className="hidden sm:inline">Invite</span>
               </button>
             ) : null}
 
-            {/* AI Copilot Action Button */}
+            {/* Evidence-First AI Copilot Trigger */}
             <button
               type="button"
               onClick={() => setCopilotOpen(true)}
-              className="flex items-center gap-1.5 rounded-lg border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary transition-colors hover:bg-primary/20"
-              title="Open AI Workspace Copilot (Ctrl+J)"
+              className="flex items-center gap-1.5 rounded-[6px] border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/20"
+              title="Open AI Engineering Copilot (Ctrl+J)"
             >
               <Sparkles className="size-3.5" />
-              <span>AI Copilot</span>
-              <kbd className="hidden sm:inline-block rounded border border-primary/30 bg-primary/5 px-1 py-0.2 text-[9px] mono opacity-80">
-                Ctrl+J
+              <span>Copilot</span>
+              <kbd className="hidden sm:inline-block rounded border border-primary/30 bg-primary/10 px-1 py-0.2 text-[9px] mono">
+                ⌘J
               </kbd>
             </button>
 
-            <div className="hidden items-center -space-x-1.5 md:flex">
+            <div className="hidden items-center -space-x-1 md:flex pl-1">
               {ws?.members.map((m) => (
                 <span
                   key={m.id}
-                  title={`${m.display_name || "Member"} · ${m.role}${m.working_area ? ` · ${m.working_area}` : ""}`}
-                  className={cn(
-                    "relative grid size-7 place-items-center rounded-full border-2 border-background text-[10px] font-semibold",
-                    m.role === "frontend"
-                      ? "bg-frontend/20 text-frontend"
-                      : m.role === "backend"
-                        ? "bg-backend/20 text-backend"
-                        : m.role === "database"
-                          ? "bg-database/20 text-database"
-                          : "bg-lead/20 text-lead",
-                  )}
+                  title={`${m.display_name || "Member"} · ${m.role}`}
+                  className="relative grid size-6 place-items-center rounded-full border border-border bg-surface text-[10px] font-semibold text-foreground"
                 >
-                  {(m.display_name || "User")
-                    .split(" ")
-                    .filter(Boolean)
-                    .map((p) => p[0])
-                    .slice(0, 2)
-                    .join("")
-                    .toUpperCase() || "U"}
+                  {(m.display_name || "U")[0]?.toUpperCase() || "U"}
                   <span
                     className={cn(
-                      "absolute -right-0.5 -bottom-0.5 size-2 rounded-full border border-background",
+                      "absolute -right-0.5 -bottom-0.5 size-1.5 rounded-full border border-background",
                       m.online ? "bg-success" : "bg-muted-foreground",
                     )}
                   />
                 </span>
               ))}
             </div>
-
-            <div className="hidden text-right sm:block">
-              <p className="max-w-40 truncate text-xs font-medium">{user?.email}</p>
-              <RoleBadge role="lead" />
-            </div>
           </div>
         </header>
 
-        <main className="mx-auto max-w-[1500px] px-4 py-6 md:px-6">{children}</main>
+        <main className="mx-auto max-w-[1540px] px-4 py-6 md:px-6">{children}</main>
       </div>
 
-      {/* Global AI Copilot Modal */}
-      <AiCopilotModal isOpen={copilotOpen} onClose={() => setCopilotOpen(false)} />
+      {/* Global Command Palette */}
+      <CommandPalette
+        open={commandOpen}
+        onOpenChange={setCommandOpen}
+        workspace={ws}
+        onOpenCopilot={() => setCopilotOpen(true)}
+      />
+
+      {/* Global AI Copilot Workspace */}
+      <AiCopilotModal
+        isOpen={copilotOpen}
+        onClose={() => setCopilotOpen(false)}
+        workspace={ws}
+      />
 
       {/* Invite Teammates Modal */}
       {ws ? (
@@ -374,7 +387,6 @@ function ProjectSwitcher() {
   const [, setActive] = useActiveProjectId();
   const navigate = useNavigate();
 
-  // Close dropdown on outside click
   useEffect(() => {
     if (!dropOpen) return;
     const handler = (e: MouseEvent) => {
@@ -397,12 +409,12 @@ function ProjectSwitcher() {
       <button
         type="button"
         onClick={() => setDropOpen(!dropOpen)}
-        className="flex w-full items-center gap-2 px-4 py-2.5 text-left transition-colors hover:bg-sidebar-accent/50"
+        className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left transition-colors hover:bg-sidebar-accent/50"
       >
-        <span className="grid size-6 shrink-0 place-items-center rounded bg-primary/10 text-primary">
+        <span className="grid size-6 shrink-0 place-items-center rounded-[4px] bg-surface text-primary border border-border">
           <Network className="size-3" />
         </span>
-        <span className="min-w-0 flex-1 truncate text-xs font-medium">
+        <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
           {ws?.project.name ?? "Select project"}
         </span>
         <ChevronDown
@@ -414,21 +426,21 @@ function ProjectSwitcher() {
       </button>
 
       {dropOpen && projects && projects.length > 0 ? (
-        <div className="absolute left-2 right-2 top-full z-50 mt-1 max-h-52 overflow-y-auto rounded-lg border border-border bg-popover py-1 shadow-lg">
+        <div className="absolute left-2 right-2 top-full z-50 mt-1 max-h-52 overflow-y-auto rounded-[8px] border border-border bg-popover py-1 shadow-md">
           {projects.map((p) => (
             <button
               key={p.id}
               type="button"
               onClick={() => switchTo(p.id)}
               className={cn(
-                "flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-accent",
-                p.id === ws?.project.id && "bg-accent/50 font-medium",
+                "flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-surface-raised",
+                p.id === ws?.project.id && "bg-surface-raised font-medium text-primary",
               )}
             >
               <Network className="size-3 shrink-0 text-muted-foreground" />
               <span className="truncate">{p.name}</span>
               {p.id === ws?.project.id ? (
-                <span className="ml-auto text-[10px] text-primary">active</span>
+                <span className="ml-auto mono text-[10px] text-primary">active</span>
               ) : null}
             </button>
           ))}
@@ -436,10 +448,10 @@ function ProjectSwitcher() {
             <Link
               to="/projects"
               onClick={() => setDropOpen(false)}
-              className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-surface-raised hover:text-foreground"
             >
               <FolderKanban className="size-3" />
-              Manage projects
+              Manage all projects
             </Link>
           </div>
         </div>

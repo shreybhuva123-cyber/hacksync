@@ -636,28 +636,28 @@ function CodeBody({ ws }: { ws: Workspace }) {
   return (
     <>
       <PageHeader
-        eyebrow="code & synchronization workspace"
-        title="Files & Code Workspace"
+        eyebrow="Code Intelligence"
+        title="Code Intelligence Workspace"
         description="Individual member workspaces, pre-sync conflict radar, unified shared codebase, and 1-click GitHub push."
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={() => setShowCodeSyncModal(true)}
-              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition-all shadow-sm ${
+              className={`flex items-center gap-1.5 rounded-[6px] px-3 py-1.5 text-xs font-semibold transition-all ${
                 pendingSyncCount > 0
-                  ? "bg-amber-500 hover:bg-amber-600 text-black animate-pulse"
-                  : "bg-primary text-primary-foreground hover:opacity-90"
+                  ? "bg-warning text-background hover:bg-warning/90"
+                  : "bg-primary text-primary-foreground hover:bg-primary/90"
               }`}
             >
               <Zap className="size-3.5" />
-              <span>⚡ CodeSync {pendingSyncCount > 0 ? `(${pendingSyncCount})` : ""}</span>
+              <span>CodeSync {pendingSyncCount > 0 ? `(${pendingSyncCount})` : ""}</span>
             </button>
 
             <button
               type="button"
               onClick={() => setShowGitHubPushModal(true)}
-              className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-accent transition-colors shadow-sm"
+              className="flex items-center gap-1.5 rounded-[6px] border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-surface-raised transition-colors shadow-sm"
             >
               <Github className="size-3.5 text-primary" />
               <span>Push to GitHub</span>
@@ -669,7 +669,7 @@ function CodeBody({ ws }: { ws: Workspace }) {
                 onClick={handleDownloadZip}
                 disabled={isExporting}
                 title="Download entire project as .ZIP archive"
-                className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-accent transition-colors shadow-sm"
+                className="flex items-center gap-1.5 rounded-[6px] border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-surface-raised transition-colors shadow-sm"
               >
                 {isExporting ? (
                   <Loader2 className="size-3.5 animate-spin" />
@@ -683,16 +683,16 @@ function CodeBody({ ws }: { ws: Workspace }) {
         }
       />
 
-      {/* 🧭 Top Mode Switcher: My Workspace vs Shared Project */}
-      <div className="flex items-center justify-between border-b border-border pb-3">
-        <div className="flex items-center gap-1 rounded-xl border border-border bg-card p-1">
+      {/* Top Mode Switcher: My Workspace vs Shared Project */}
+      <div className="flex items-center justify-between border-b border-border pb-3 mb-4">
+        <div className="flex items-center gap-1 rounded-[8px] border border-border bg-surface p-1">
           <button
             type="button"
             onClick={() => setWorkspaceMode("my_workspace")}
-            className={`flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-xs font-bold transition-all ${
+            className={`flex items-center gap-2 rounded-[6px] px-3 py-1 text-xs font-medium transition-all ${
               workspaceMode === "my_workspace"
-                ? "bg-primary text-primary-foreground shadow-sm"
-                : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                ? "bg-surface-raised text-foreground border border-border"
+                : "text-muted-foreground hover:bg-surface hover:text-foreground"
             }`}
           >
             <Laptop className="size-3.5" />
@@ -702,10 +702,10 @@ function CodeBody({ ws }: { ws: Workspace }) {
           <button
             type="button"
             onClick={() => setWorkspaceMode("shared_project")}
-            className={`flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-xs font-bold transition-all ${
+            className={`flex items-center gap-2 rounded-[6px] px-3 py-1 text-xs font-medium transition-all ${
               workspaceMode === "shared_project"
-                ? "bg-primary text-primary-foreground shadow-sm"
-                : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                ? "bg-surface-raised text-foreground border border-border"
+                : "text-muted-foreground hover:bg-surface hover:text-foreground"
             }`}
           >
             <Layers className="size-3.5" />
