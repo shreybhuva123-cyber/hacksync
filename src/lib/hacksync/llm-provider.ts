@@ -385,8 +385,10 @@ export async function executeOperation<T>(params: { id: string; payload?: unknow
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Unified LLM Query Dispatcher (with Client-Side Key Support)
+// Unified LLM Query Dispatcher (with AI Orchestrator & Evidence Engine)
 // ─────────────────────────────────────────────────────────────────────────────
+
+import { AIOrchestrator } from "./ai/orchestrator";
 
 export async function queryLLM(
   prompt: string,
@@ -395,102 +397,20 @@ export async function queryLLM(
   chatHistory: { role: string; content: string }[] = [],
   modelPreference = "builtin",
 ): Promise<{ text: string; providerUsed: string }> {
-  const systemPrompt = buildWorkspaceSystemPrompt(ws, activeNode);
+  const result = await AIOrchestrator.processQuery({
+    query: prompt,
+    ws,
+    activeNode,
+    modelPreference,
+    chatHistory,
+  });
 
-  // 1. Check for client-side user keys in localStorage
-  if (typeof window !== "undefined") {
-    const userGeminiKey = localStorage.getItem("hacksync_gemini_key");
-    const userOpenaiKey = localStorage.getItem("hacksync_openai_key");
-
-    if (modelPreference === "gemini" && userGeminiKey) {
-      try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(userGeminiKey.trim())}`;
-        const contents = [
-          ...chatHistory.slice(-6).map((m) => ({
-            role: m.role === "assistant" ? "model" : "user",
-            parts: [{ text: m.content }],
-          })),
-          { role: "user", parts: [{ text: prompt }] },
-        ];
-
-        const res = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            system_instruction: { parts: [{ text: systemPrompt }] },
-            contents,
-            generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
-          }),
-        });
-
-        if (res.ok) {
-          const data = await res.json();
-          const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (text) {
-            return { text, providerUsed: "Google Gemini 2.0 Flash (Client API Key)" };
-          }
-        }
-      } catch (err) {
-        logger.warn("Client Gemini direct query failed", { error: String(err) });
-      }
-    }
-
-    if (modelPreference === "openai" && userOpenaiKey) {
-      try {
-        const res = await fetch("https://api.openai.com/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${userOpenaiKey.trim()}`,
-          },
-          body: JSON.stringify({
-            model: "gpt-4o-mini",
-            messages: [
-              { role: "system", content: systemPrompt },
-              ...chatHistory.slice(-6).map((m) => ({
-                role: m.role === "assistant" ? "assistant" : "user",
-                content: m.content,
-              })),
-              { role: "user", content: prompt },
-            ],
-            temperature: 0.7,
-          }),
-        });
-
-        if (res.ok) {
-          const data = await res.json();
-          const text = data?.choices?.[0]?.message?.content;
-          if (text) {
-            return { text, providerUsed: "OpenAI GPT-4o-mini (Client API Key)" };
-          }
-        }
-      } catch (err) {
-        logger.warn("Client OpenAI direct query failed", { error: String(err) });
-      }
-    }
-  }
-
-  // 2. Dispatch through Server AI Gateway
-  try {
-    const result = await processServerAIQuery(
-      {
-        prompt,
-        model: modelPreference as any,
-        projectId: ws?.project.id ?? null,
-        chatHistory: chatHistory as any,
-      },
-      ws?.project.id ?? "anonymous",
-      systemPrompt,
-    );
-
-    if (result.text) {
-      return result;
-    }
-  } catch (err) {
-    logger.warn("AI Gateway query failed, using built-in reasoning engine", { error: String(err) });
-  }
-
-  // 3. Autonomous Deep Reasoning Engine (Zero setup, 100% offline & fast)
-  const text = synthesizeAutonomousResponse(prompt, ws, activeNode);
-  return { text, providerUsed: "HackSync Deep Reasoning Engine" };
+  return {
+    text: result.text,
+    providerUsed: result.modelUsed === "gemini-2.0-flash"
+      ? "Google Gemini 2.0 Flash (Orchestrated)"
+      : result.modelUsed === "gpt-4o-mini"
+        ? "OpenAI GPT-4o Mini (Orchestrated)"
+        : "HackSync Deterministic Project Intelligence",
+  };
 }

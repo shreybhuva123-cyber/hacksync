@@ -1,6 +1,7 @@
-import { Bug, Check, Wrench } from "lucide-react";
+import { useState } from "react";
+import { Bug, Check, Sparkles, Wrench } from "lucide-react";
 import { CodeBlock, StatusPill, Panel } from "@/components/hacksync/primitives";
-import type { CodeAnalysisResult } from "@/lib/hacksync/ai-assistant";
+import type { CodeAnalysisResult, CodeBug } from "@/lib/hacksync/ai-assistant";
 
 interface CodeBugsTabProps {
   analysis: CodeAnalysisResult | null;
@@ -8,6 +9,42 @@ interface CodeBugsTabProps {
 
 export function CodeBugsTab({ analysis }: CodeBugsTabProps) {
   const bugs = analysis?.bugs ?? [];
+  const [copiedBugId, setCopiedBugId] = useState<string | null>(null);
+
+  const handleGeneratePrompt = (bug: CodeBug) => {
+    const prompt = `ROLE:
+You are a senior full-stack software engineer.
+
+TASK:
+Fix the following bug in the HackSync workspace code.
+
+BUG DETAILS:
+- Title: ${bug.title}
+- Line: ${bug.line}
+- Category: ${bug.category}
+- Severity: ${bug.severity.toUpperCase()}
+${bug.snippet ? `- Code Snippet:\n\`\`\`typescript\n${bug.snippet}\n\`\`\`` : ""}
+
+DESCRIPTION:
+${bug.description}
+
+DEBUGGING GUIDE:
+${bug.debuggingGuide}
+
+SUGGESTED FIX:
+\`\`\`typescript
+${bug.suggestedFix}
+\`\`\`
+
+REQUIREMENTS:
+1. Fix the bug while preserving existing functionality and API signatures.
+2. Include defensive checks against undefined/null.
+3. Provide a unified Git diff and unit test cases verifying the fix.`;
+
+    void navigator.clipboard.writeText(prompt);
+    setCopiedBugId(bug.id);
+    setTimeout(() => setCopiedBugId(null), 2500);
+  };
 
   return (
     <Panel className="p-5 space-y-4">
@@ -43,14 +80,34 @@ export function CodeBugsTab({ analysis }: CodeBugsTabProps) {
               key={bug.id}
               className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 space-y-3"
             >
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <span className="mono rounded bg-destructive/20 px-1.5 py-0.5 text-xs font-bold text-destructive">
                     Line {bug.line}
                   </span>
                   <h4 className="text-xs font-semibold text-foreground">{bug.title}</h4>
                 </div>
-                <StatusPill tone="danger">{bug.category}</StatusPill>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleGeneratePrompt(bug)}
+                    className="flex items-center gap-1.5 rounded-md border border-primary/30 bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary hover:bg-primary/20 transition-colors"
+                    title="Copy structured senior engineer prompt to clipboard"
+                  >
+                    {copiedBugId === bug.id ? (
+                      <>
+                        <Check className="size-3 text-success" />
+                        <span className="text-success">Prompt Copied!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="size-3" />
+                        <span>Generate Agent Prompt</span>
+                      </>
+                    )}
+                  </button>
+                  <StatusPill tone="danger">{bug.category}</StatusPill>
+                </div>
               </div>
 
               {bug.snippet ? (

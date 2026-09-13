@@ -31,6 +31,7 @@ export interface SecurityVulnerability {
     explanation: string;
   };
   autoFixable: boolean;
+  confidence?: number | undefined;
 }
 
 export interface SecurityAuditResult {
@@ -118,6 +119,7 @@ export function auditWorkspaceSecurity(ws: Workspace): SecurityAuditResult {
     // Scan Secrets
     SECRET_PATTERNS.forEach((pattern) => {
       lines.forEach((line, idx) => {
+        pattern.regex.lastIndex = 0; // Reset stateful /g regex to avoid skipping matches
         if (pattern.regex.test(line)) {
           vulnerabilities.push({
             id: `sec-secret-${node.id}-${idx + 1}`,
@@ -141,6 +143,7 @@ export function auditWorkspaceSecurity(ws: Workspace): SecurityAuditResult {
               explanation: "Extract credentials to environment variables and do not commit them.",
             },
             autoFixable: true,
+            confidence: 95,
           });
         }
       });
@@ -149,6 +152,7 @@ export function auditWorkspaceSecurity(ws: Workspace): SecurityAuditResult {
     // Scan SQL Injection
     SQLI_PATTERNS.forEach((pattern) => {
       lines.forEach((line, idx) => {
+        pattern.regex.lastIndex = 0; // Reset stateful /g regex to avoid skipping matches
         if (pattern.regex.test(line)) {
           vulnerabilities.push({
             id: `sec-sqli-${node.id}-${idx + 1}`,
@@ -173,6 +177,7 @@ export function auditWorkspaceSecurity(ws: Workspace): SecurityAuditResult {
               explanation: "Replace interpolated query with parameterized API call.",
             },
             autoFixable: true,
+            confidence: 90,
           });
         }
       });
@@ -181,6 +186,7 @@ export function auditWorkspaceSecurity(ws: Workspace): SecurityAuditResult {
     // Scan Error Stack Trace Leaks
     ERROR_LEAK_PATTERNS.forEach((pattern) => {
       lines.forEach((line, idx) => {
+        pattern.regex.lastIndex = 0; // Reset stateful /g regex to avoid skipping matches
         if (pattern.regex.test(line)) {
           vulnerabilities.push({
             id: `sec-errleak-${node.id}-${idx + 1}`,
@@ -206,6 +212,7 @@ export function auditWorkspaceSecurity(ws: Workspace): SecurityAuditResult {
                 "Sanitize client-facing error responses while logging details internally.",
             },
             autoFixable: true,
+            confidence: 92,
           });
         }
       });
@@ -243,6 +250,7 @@ export function auditWorkspaceSecurity(ws: Workspace): SecurityAuditResult {
           explanation: "Lock down endpoint to authenticated users and enforce Row Level Security.",
         },
         autoFixable: true,
+        confidence: 95,
       });
     } else {
       passedChecksCount++;
@@ -274,6 +282,7 @@ export function auditWorkspaceSecurity(ws: Workspace): SecurityAuditResult {
           explanation: "Enable authentication requirement for this contract.",
         },
         autoFixable: true,
+        confidence: 94,
       });
     } else {
       passedChecksCount++;
@@ -307,6 +316,7 @@ export function auditWorkspaceSecurity(ws: Workspace): SecurityAuditResult {
           explanation: "Add standard UUID primary key column.",
         },
         autoFixable: true,
+        confidence: 96,
       });
     } else {
       passedChecksCount++;
@@ -338,6 +348,7 @@ export function auditWorkspaceSecurity(ws: Workspace): SecurityAuditResult {
           explanation: "Hash credentials before database insertion.",
         },
         autoFixable: false,
+        confidence: 98,
       });
     });
   });
@@ -362,6 +373,7 @@ export function auditWorkspaceSecurity(ws: Workspace): SecurityAuditResult {
       remediation:
         "Configure these variables in `.env` and verify their presence at application startup.",
       autoFixable: false,
+      confidence: 99,
     });
   } else {
     passedChecksCount++;
@@ -404,3 +416,6 @@ export function auditWorkspaceSecurity(ws: Workspace): SecurityAuditResult {
     passedChecksCount: Math.max(1, passedChecksCount),
   };
 }
+
+export { SecurityAuditor, type SecurityFinding, type SecurityReport } from "./security/security-auditor";
+export { ProjectHealthCalculator, type HealthScoreBreakdown } from "./security/health-score";

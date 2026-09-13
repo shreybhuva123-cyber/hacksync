@@ -1,8 +1,11 @@
 import { useState, useRef, useEffect } from "react";
 import {
+  Activity,
+  AlertTriangle,
   Bot,
   Check,
   Copy,
+  GitBranch,
   KeyRound,
   Loader2,
   RotateCcw,
@@ -11,6 +14,7 @@ import {
   Shield,
   Sparkles,
   Terminal,
+  Wrench,
   X,
   Zap,
 } from "lucide-react";
@@ -23,28 +27,41 @@ import {
   type LLMProviderType,
 } from "@/lib/hacksync/llm-provider";
 import { cn } from "@/lib/utils";
+import { ApprovalGate } from "@/lib/hacksync/ai/approval-gate";
+import { ProjectHealthCalculator } from "@/lib/hacksync/security/health-score";
+import { AIEvaluator } from "@/lib/hacksync/evaluation/evaluator";
+import { AIOrchestrator } from "@/lib/hacksync/ai/orchestrator";
 
 const PRESET_PROMPTS = [
   {
     icon: Shield,
-    label: "Cyber Security Audit",
-    prompt: "Perform a full cyber security audit on our workspace contracts and database schema.",
+    label: "Auth & SQLi Audit",
+    prompt: "Find authentication vulnerabilities and SQL injection risks in our workspace.",
+  },
+  {
+    icon: Zap,
+    label: "Debug Login 500",
+    prompt: "Why does my login API return 500 or fail unexpectedly?",
+  },
+  {
+    icon: GitBranch,
+    label: "Review Recent Changes",
+    prompt: "Review my recent workspace changes for regressions and vulnerabilities.",
+  },
+  {
+    icon: Activity,
+    label: "Calculate Health Score",
+    prompt: "Calculate our project health score with 5-factor quality breakdown.",
   },
   {
     icon: Sparkles,
-    label: "For vs While Loops",
-    prompt:
-      "Why did we use a for loop instead of a while loop in our code, and how do I convert it to a while loop?",
+    label: "Run AI Benchmark",
+    prompt: "Run AI quality evaluation benchmark (BM-1 to BM-7) on our engineering agent.",
   },
   {
     icon: Terminal,
     label: "API Contracts & SDK",
     prompt: "Show me all API contracts and generate a type-safe TypeScript client snippet.",
-  },
-  {
-    icon: Zap,
-    label: "Async Bugs & Performance",
-    prompt: "Analyze our workspace for floating unhandled promises and suggest optimizations.",
   },
 ];
 
@@ -93,6 +110,7 @@ I have direct access to your repository structure, database schema, and live int
   ]);
   const [input, setInput] = useState("");
   const [isThinking, setIsThinking] = useState(false);
+  const [copiedPromptBanner, setCopiedPromptBanner] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -114,6 +132,71 @@ I have direct access to your repository structure, database schema, and live int
 
   if (!isOpen) return null;
 
+  const handleResolveApproval = (approvalId: string, decision: "approved" | "rejected") => {
+    try {
+      ApprovalGate.resolveApproval(approvalId, decision);
+      setMessages((prev) =>
+        prev.map((msg) => {
+          if (msg.pendingApproval?.id === approvalId) {
+            return {
+              ...msg,
+              pendingApproval: {
+                ...msg.pendingApproval,
+                status: decision,
+              },
+            };
+          }
+          return msg;
+        }),
+      );
+      const confirmationText =
+        decision === "approved"
+          ? `✅ **Approval Confirmed**: User explicitly authorized mutating tool execution. Modifications applied.`
+          : `🛑 **Approval Denied**: Mutating tool execution was rejected by user. Workspace files remain untouched.`;
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `resolution-${Date.now()}`,
+          role: "assistant",
+          timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          content: confirmationText,
+          intent: "fix",
+        },
+      ]);
+    } catch (err: unknown) {
+      console.error("Failed to resolve approval", err);
+    }
+  };
+
+  const handleActionClick = (action: string, payload?: unknown) => {
+    if (action === "fix_plan") {
+      void handleSend("Generate a step-by-step fix plan with unified diff for the identified issue.");
+    } else if (action === "generate_tests") {
+      void handleSend("Generate automated unit tests verifying the fix and checking edge cases.");
+    } else if (action === "security_audit") {
+      void handleSend("Perform a comprehensive passive cyber security audit on all workspace files.");
+    } else if (action === "health_score") {
+      void handleSend("Calculate our project health score with 5-factor quality breakdown.");
+    } else if (action === "agent_prompt") {
+      const bugId = (payload as { bugId?: string } | undefined)?.bugId;
+      const prompt = `ROLE:
+You are a senior full-stack software engineer.
+
+TASK:
+Fix the identified code defect in HackSync Workspace (${ws?.project.name ?? "Project"})${bugId ? ` (Finding ID: ${bugId})` : ""}.
+
+REQUIREMENTS:
+1. Handle null/undefined checks defensively before accessing properties.
+2. Return safe HTTP status codes without leaking stack traces.
+3. Preserve existing API response contracts and database behaviors.
+4. Provide a unified Git diff and unit test cases verifying the fix.`;
+
+      void navigator.clipboard.writeText(prompt);
+      setCopiedPromptBanner("Senior Engineer prompt copied to clipboard! Paste directly into your coding AI.");
+      setTimeout(() => setCopiedPromptBanner(null), 3500);
+    }
+  };
+
   const handleSend = async (textToSend?: string) => {
     const text = textToSend || input.trim();
     if (!text || isThinking) return;
@@ -131,6 +214,72 @@ I have direct access to your repository structure, database schema, and live int
     setIsThinking(true);
 
     try {
+      if (text.toLowerCase().includes("benchmark") || text.toLowerCase().includes("evaluation")) {
+        const report = await AIEvaluator.runBenchmark(ws ?? null);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `eval-${Date.now()}`,
+            role: "assistant",
+            timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+            content: report.summaryMarkdown,
+            intent: "testing",
+            modelUsed: "builtin",
+            toolCalls: [
+              {
+                name: "benchmark_runner",
+                success: true,
+                summary: `Evaluated ${report.results.length} cases • Score: ${report.metrics.overallScore}% • Intent Acc: ${report.metrics.intentAccuracy}%`,
+              },
+            ],
+            suggestedActions: [
+              { label: "🛡️ Passive Security Audit", action: "security_audit" },
+              { label: "📊 Recalculate Health Score", action: "health_score" },
+            ],
+          },
+        ]);
+        return;
+      }
+
+      if (text.toLowerCase().includes("health score")) {
+        const health = ProjectHealthCalculator.calculate(AIOrchestrator.getKnowledgeGraph(), ws ?? null);
+        const healthMarkdown = `### 🏥 HackSync Project Health Score: ${health.overallScore}/100 (Grade: ${health.letterGrade})
+
+| Factor | Weight | Score | Evaluation Target |
+| :--- | :--- | :--- | :--- |
+| **Cyber Security** | 30% | **${health.securityScore}%** | Static AST vulnerabilities & secret exposure |
+| **Code Quality** | 20% | **${health.codeQualityScore}%** | Null-safety, syntax traps, logic faults |
+| **Testing Coverage** | 20% | **${health.testingScore}%** | Contract & unit test verification status |
+| **Performance** | 15% | **${health.performanceScore}%** | Unhandled promises & loop efficiency |
+| **Dependencies** | 15% | **${health.dependenciesScore}%** | Unpinned versions & GHSA advisories |
+
+> ⚠️ **Disclaimer**: *${health.disclaimer}*`;
+
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `health-${Date.now()}`,
+            role: "assistant",
+            timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+            content: healthMarkdown,
+            intent: "architecture",
+            modelUsed: "builtin",
+            toolCalls: [
+              {
+                name: "project_health_calculator",
+                success: true,
+                summary: `Grade: ${health.letterGrade} (${health.overallScore}%) based on 5 weighted pillars`,
+              },
+            ],
+            suggestedActions: [
+              { label: "🛡️ Security Audit", action: "security_audit" },
+              { label: "🧪 Generate Tests", action: "generate_tests" },
+            ],
+          },
+        ]);
+        return;
+      }
+
       const response = await askWorkspaceCopilot(
         text,
         ws ?? null,
@@ -435,7 +584,103 @@ I have direct access to your repository structure, database schema, and live int
                     : "border border-border bg-surface text-foreground shadow-sm",
                 )}
               >
+                {/* Assistant Capability Tag */}
+                {m.role !== "user" && m.intent && (
+                  <div className="mb-2">
+                    <span className="inline-flex items-center gap-1 rounded bg-primary/15 px-2 py-0.5 text-[10px] font-mono font-bold uppercase text-primary border border-primary/25">
+                      ⚡ Capability: {m.intent}
+                    </span>
+                  </div>
+                )}
+
+                {/* Tool Execution Trace */}
+                {m.role !== "user" && m.toolCalls && m.toolCalls.length > 0 && (
+                  <div className="mb-2.5 flex flex-wrap items-center gap-1.5 rounded-md bg-muted/60 p-2 text-[10px] border border-border">
+                    <span className="font-semibold text-foreground flex items-center gap-1 shrink-0">
+                      <Wrench className="size-3 text-primary" /> Tools:
+                    </span>
+                    {m.toolCalls.map((t, tidx) => (
+                      <span
+                        key={tidx}
+                        className="rounded bg-background px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground border border-border"
+                        title={t.summary}
+                      >
+                        <span className="font-semibold text-foreground">{t.name}</span> ({t.summary})
+                      </span>
+                    ))}
+                  </div>
+                )}
+
                 <MarkdownContent content={m.content} />
+
+                {/* Suggested Action Buttons */}
+                {m.role !== "user" && m.suggestedActions && m.suggestedActions.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-1.5 pt-2 border-t border-border/60">
+                    {m.suggestedActions.map((sa, sidx) => (
+                      <button
+                        key={sidx}
+                        type="button"
+                        onClick={() => handleActionClick(sa.action, sa.payload)}
+                        className="flex items-center gap-1 rounded-md border border-primary/30 bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary hover:bg-primary/20 transition-colors"
+                      >
+                        {sa.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Human-in-the-loop Approval Gate */}
+                {m.role !== "user" && m.pendingApproval && (
+                  <div className="mt-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 space-y-2 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
+                        <AlertTriangle className="size-4" /> Mutating Action Approval Required
+                      </span>
+                      <span className="rounded bg-amber-500/20 px-2 py-0.5 text-[10px] font-mono font-bold uppercase text-amber-800 dark:text-amber-300">
+                        {m.pendingApproval.status}
+                      </span>
+                    </div>
+                    <p className="text-foreground text-[11px]">
+                      The orchestrator requests permission to run{" "}
+                      <code className="text-primary font-bold">{m.pendingApproval.toolName}</code>:
+                    </p>
+                    <div className="rounded bg-background/80 p-2 text-[11px] text-muted-foreground border border-border">
+                      <p className="font-medium text-foreground">{m.pendingApproval.summary}</p>
+                      <p className="mt-0.5 text-[10px]">
+                        Files: {m.pendingApproval.filesAffected.join(", ")}
+                      </p>
+                    </div>
+                    {m.pendingApproval.diffPreview && (
+                      <details className="text-[10px] text-muted-foreground cursor-pointer">
+                        <summary className="font-semibold text-foreground hover:underline">
+                          View Diff Preview
+                        </summary>
+                        <pre className="mt-1 max-h-32 overflow-auto rounded bg-background p-2 font-mono text-[10px]">
+                          {m.pendingApproval.diffPreview}
+                        </pre>
+                      </details>
+                    )}
+                    {m.pendingApproval.status === "pending" && (
+                      <div className="flex items-center gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => handleResolveApproval(m.pendingApproval!.id, "approved")}
+                          className="flex items-center gap-1 rounded bg-success px-3 py-1 text-xs font-semibold text-success-foreground hover:opacity-90 cursor-pointer"
+                        >
+                          <Check className="size-3" /> Approve Action
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleResolveApproval(m.pendingApproval!.id, "rejected")}
+                          className="flex items-center gap-1 rounded bg-destructive px-3 py-1 text-xs font-semibold text-destructive-foreground hover:opacity-90 cursor-pointer"
+                        >
+                          <X className="size-3" /> Reject
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <span
                   className={cn(
                     "mt-2 block text-[10px]",
@@ -460,6 +705,23 @@ I have direct access to your repository structure, database schema, and live int
           ) : null}
           <div ref={messagesEndRef} />
         </div>
+
+        {/* Copied Banner Toast */}
+        {copiedPromptBanner && (
+          <div className="border-t border-primary/30 bg-primary/10 px-4 py-2 text-xs font-medium text-primary flex items-center justify-between animate-in fade-in">
+            <span className="flex items-center gap-1.5">
+              <Check className="size-3.5 text-success" />
+              {copiedPromptBanner}
+            </span>
+            <button
+              type="button"
+              onClick={() => setCopiedPromptBanner(null)}
+              className="text-muted-foreground hover:text-foreground"
+            >
+              <X className="size-3.5" />
+            </button>
+          </div>
+        )}
 
         {/* Input Bar */}
         <footer className="border-t border-border bg-surface p-3 shrink-0">
@@ -512,17 +774,194 @@ function MarkdownContent({ content }: { content: string }) {
           return <CodeSnippet key={idx} lang={lang} code={code} />;
         }
 
+        return <MarkdownParagraph key={idx} text={part} />;
+      })}
+    </div>
+  );
+}
+
+/** Renders a non-code-block markdown chunk as proper HTML elements */
+function MarkdownParagraph({ text }: { text: string }) {
+  const lines = text.split("\n");
+
+  return (
+    <div className="space-y-1 leading-relaxed">
+      {lines.map((line, i) => {
+        const trimmed = line.trim();
+        if (!trimmed) return <div key={i} className="h-1" />;
+
+        // Horizontal rule
+        if (/^---+$/.test(trimmed)) {
+          return <hr key={i} className="border-border my-2" />;
+        }
+
+        // Headings
+        if (trimmed.startsWith("#### ")) {
+          return (
+            <h4 key={i} className="font-semibold text-xs mt-2 mb-0.5">
+              {renderInline(trimmed.slice(5))}
+            </h4>
+          );
+        }
+        if (trimmed.startsWith("### ")) {
+          return (
+            <h3 key={i} className="font-bold text-sm mt-3 mb-1">
+              {renderInline(trimmed.slice(4))}
+            </h3>
+          );
+        }
+        if (trimmed.startsWith("## ")) {
+          return (
+            <h2 key={i} className="font-bold text-base mt-3 mb-1">
+              {renderInline(trimmed.slice(3))}
+            </h2>
+          );
+        }
+
+        // Table rows
+        if (trimmed.startsWith("|") && trimmed.endsWith("|")) {
+          // Skip separator rows like |---|---|
+          if (/^\|[\s:]*-+[\s:]*(\|[\s:]*-+[\s:]*)*\|$/.test(trimmed)) {
+            return null;
+          }
+          const cells = trimmed
+            .slice(1, -1)
+            .split("|")
+            .map((c) => c.trim());
+          return (
+            <div
+              key={i}
+              className="grid gap-2 text-[11px] border-b border-border/50 py-1 font-mono"
+              style={{ gridTemplateColumns: `repeat(${cells.length}, minmax(0, 1fr))` }}
+            >
+              {cells.map((cell, ci) => (
+                <span key={ci} className="truncate">
+                  {renderInline(cell)}
+                </span>
+              ))}
+            </div>
+          );
+        }
+
+        // Blockquote / alerts
+        if (trimmed.startsWith("> ")) {
+          return (
+            <div key={i} className="border-l-2 border-primary/40 pl-3 text-muted-foreground italic">
+              {renderInline(trimmed.slice(2))}
+            </div>
+          );
+        }
+
+        // Unordered list items
+        if (/^[-*]\s/.test(trimmed)) {
+          return (
+            <div key={i} className="flex gap-1.5 pl-2">
+              <span className="text-primary mt-0.5 shrink-0">•</span>
+              <span>{renderInline(trimmed.slice(2))}</span>
+            </div>
+          );
+        }
+
+        // Numbered list items
+        const olMatch = trimmed.match(/^(\d+)\.\s+(.*)$/);
+        if (olMatch) {
+          return (
+            <div key={i} className="flex gap-1.5 pl-2">
+              <span className="text-primary font-semibold shrink-0">{olMatch[1]}.</span>
+              <span>{renderInline(olMatch[2])}</span>
+            </div>
+          );
+        }
+
+        // Normal paragraph
         return (
-          <div
-            key={idx}
-            className="whitespace-pre-wrap leading-relaxed [&_h3]:font-bold [&_h3]:text-sm [&_h3]:mt-2 [&_h3]:mb-1 [&_h4]:font-semibold [&_h4]:text-xs [&_h4]:mt-1.5 [&_h4]:mb-0.5 [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4"
-          >
-            {part}
-          </div>
+          <p key={i}>
+            {renderInline(trimmed)}
+          </p>
         );
       })}
     </div>
   );
+}
+
+/** Renders inline markdown: bold, inline code, links, italic */
+function renderInline(text: string): React.ReactNode {
+  if (!text) return null;
+
+  // Split on inline patterns: **bold**, `code`, [text](url), *italic*
+  const parts: React.ReactNode[] = [];
+  // Process segments iteratively to handle multiple inline formats
+  const regex = /(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\([^)]+\)|\*[^*]+\*|\$[^$]+\$)/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(text)) !== null) {
+    // Add text before this match
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index));
+    }
+
+    const token = match[0];
+    if (token.startsWith("**") && token.endsWith("**")) {
+      // Bold
+      parts.push(
+        <strong key={`b-${match.index}`} className="font-semibold text-foreground">
+          {token.slice(2, -2)}
+        </strong>,
+      );
+    } else if (token.startsWith("`") && token.endsWith("`")) {
+      // Inline code
+      parts.push(
+        <code
+          key={`c-${match.index}`}
+          className="rounded bg-muted px-1 py-0.5 font-mono text-[10px] text-primary border border-border/50"
+        >
+          {token.slice(1, -1)}
+        </code>,
+      );
+    } else if (token.startsWith("[")) {
+      // Link [text](url)
+      const linkMatch = token.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+      if (linkMatch) {
+        parts.push(
+          <a
+            key={`l-${match.index}`}
+            href={linkMatch[2]}
+            target="_blank"
+            rel="noreferrer"
+            className="text-primary underline hover:opacity-80"
+          >
+            {linkMatch[1]}
+          </a>,
+        );
+      } else {
+        parts.push(token);
+      }
+    } else if (token.startsWith("*") && token.endsWith("*")) {
+      // Italic
+      parts.push(
+        <em key={`i-${match.index}`}>{token.slice(1, -1)}</em>,
+      );
+    } else if (token.startsWith("$") && token.endsWith("$")) {
+      // Math — render as inline code for simplicity
+      parts.push(
+        <code key={`m-${match.index}`} className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">
+          {token.slice(1, -1)}
+        </code>,
+      );
+    } else {
+      parts.push(token);
+    }
+
+    lastIndex = match.index + match[0].length;
+  }
+
+  // Add remaining text
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
+
+  return parts.length === 1 ? parts[0] : <>{parts}</>;
 }
 
 function CodeSnippet({ lang, code }: { lang: string; code: string }) {

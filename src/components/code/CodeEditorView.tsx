@@ -1,6 +1,8 @@
-import { Edit3, Eye, Save, Loader2, Check } from "lucide-react";
+import { useState } from "react";
+import { Edit3, Eye, Save, Loader2, Check, History } from "lucide-react";
 import { CodeBlock, CopyButton } from "@/components/hacksync/primitives";
-import type { CodeNode } from "@/lib/hacksync/types";
+import { FileVersionHistoryModal } from "./FileVersionHistoryModal";
+import type { CodeNode, FileVersion, Role } from "@/lib/hacksync/types";
 
 interface CodeEditorViewProps {
   node: CodeNode;
@@ -10,6 +12,10 @@ interface CodeEditorViewProps {
   onToggleEdit: () => void;
   onBufferChange: (val: string) => void;
   onSave: () => void;
+  projectId?: string;
+  currentUserName?: string;
+  currentUserRole?: Role;
+  onVersionRestored?: (newVersion: FileVersion) => void;
 }
 
 export function CodeEditorView({
@@ -20,21 +26,49 @@ export function CodeEditorView({
   onToggleEdit,
   onBufferChange,
   onSave,
+  projectId,
+  currentUserName,
+  currentUserRole,
+  onVersionRestored,
 }: CodeEditorViewProps) {
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
   const content = node.content || "// File content not loaded";
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between border-b border-border pb-3">
-        <div className="flex items-center gap-2">
-          <span className="mono text-xs font-semibold">{node.path}</span>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="mono text-xs font-semibold text-foreground">{node.path}</span>
           <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase font-bold text-muted-foreground">
             {node.language || "typescript"}
           </span>
+          <span className="mono rounded bg-primary/15 text-primary px-2 py-0.5 text-[10px] font-bold">
+            V{node.current_version_number || 1}
+          </span>
+          {node.contributors && node.contributors.length > 0 && (
+            <span
+              className="text-[10px] text-muted-foreground hidden sm:inline"
+              title={`Contributors: ${node.contributors.join(", ")}`}
+            >
+              ({node.contributors.join(", ")})
+            </span>
+          )}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <CopyButton value={isEditing ? editBuffer : content} label="Copy Code" />
+
+          {projectId && (
+            <button
+              type="button"
+              onClick={() => setShowHistoryModal(true)}
+              title="View immutable version history and restore past versions"
+              className="flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:bg-accent transition-colors"
+            >
+              <History className="size-3.5 text-primary" />
+              <span>History</span>
+            </button>
+          )}
 
           <button
             type="button"
@@ -91,6 +125,24 @@ export function CodeEditorView({
         />
       ) : (
         <CodeBlock code={content} language={node.language || "typescript"} />
+      )}
+
+      {/* Immutable Version History Modal */}
+      {projectId && (
+        <FileVersionHistoryModal
+          isOpen={showHistoryModal}
+          onClose={() => setShowHistoryModal(false)}
+          projectId={projectId}
+          filePath={node.path}
+          currentContent={node.content || ""}
+          currentVersionNumber={node.current_version_number || 1}
+          currentUserName={currentUserName || "Developer"}
+          currentUserRole={currentUserRole || "lead"}
+          onVersionRestored={(newVersion) => {
+            setShowHistoryModal(false);
+            onVersionRestored?.(newVersion);
+          }}
+        />
       )}
     </div>
   );

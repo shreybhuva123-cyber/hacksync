@@ -633,3 +633,60 @@ BEGIN
       (v_demo_id, 'DATABASE_URL', 'postgresql://postgres:***@db.campusmesh.dev:5432/postgres', 'Primary database connection', true, ARRAY['backend','database']);
   END IF;
 END $$;
+
+-- 9. File Versions Table & Smart Merge Support
+CREATE TABLE IF NOT EXISTS public.file_versions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id uuid NOT NULL REFERENCES public.projects(id) ON DELETE CASCADE,
+  node_id uuid REFERENCES public.code_nodes(id) ON DELETE SET NULL,
+  file_path text NOT NULL,
+  version_number integer NOT NULL DEFAULT 1,
+  content text NOT NULL,
+  content_hash text NOT NULL,
+  base_version_number integer,
+  parent_version_number integer,
+  created_by_user_id text,
+  created_by_name text NOT NULL DEFAULT 'Developer',
+  created_by_role text CHECK (created_by_role IN ('frontend', 'backend', 'database', 'lead', 'member', 'owner')),
+  contributors text[] NOT NULL DEFAULT '{}',
+  change_summary text NOT NULL DEFAULT 'Synchronized via CodeSync',
+  change_type text NOT NULL DEFAULT 'edit' CHECK (change_type IN ('initial', 'edit', 'auto_merge', 'manual_merge', 'rollback', 'delete')),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_file_versions_project ON public.file_versions(project_id);
+CREATE INDEX IF NOT EXISTS idx_file_versions_path ON public.file_versions(project_id, file_path);
+CREATE INDEX IF NOT EXISTS idx_file_versions_lookup ON public.file_versions(project_id, file_path, version_number DESC);
+
+ALTER TABLE public.code_nodes 
+  ADD COLUMN IF NOT EXISTS current_version_number integer NOT NULL DEFAULT 1,
+  ADD COLUMN IF NOT EXISTS content_hash text,
+  ADD COLUMN IF NOT EXISTS last_synced_by text,
+  ADD COLUMN IF NOT EXISTS contributors text[] DEFAULT '{}',
+  ADD COLUMN IF NOT EXISTS is_deleted boolean NOT NULL DEFAULT false;
+
+ALTER TABLE public.member_files
+  ADD COLUMN IF NOT EXISTS base_version_number integer NOT NULL DEFAULT 1,
+  ADD COLUMN IF NOT EXISTS base_content text,
+  ADD COLUMN IF NOT EXISTS base_hash text,
+  ADD COLUMN IF NOT EXISTS content_hash text,
+  ADD COLUMN IF NOT EXISTS is_deleted boolean NOT NULL DEFAULT false;
+
+ALTER TABLE public.sync_sessions
+  ADD COLUMN IF NOT EXISTS session_number integer,
+  ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'completed',
+  ADD COLUMN IF NOT EXISTS auto_merged_count integer NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS conflicts_count integer NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS new_files_count integer NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS deleted_files_count integer NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS contributors text[] DEFAULT '{}';
+
+ALTER TABLE public.file_versions ENABLE ROW LEVEL SECURITY;
+GRANT ALL ON public.file_versions TO authenticated, service_role;
+
+DROP POLICY IF EXISTS "file_versions_select_policy" ON public.file_versions;
+CREATE POLICY "file_versions_select_policy" ON public.file_versions FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "file_versions_insert_policy" ON public.file_versions;
+CREATE POLICY "file_versions_insert_policy" ON public.file_versions FOR INSERT WITH CHECK (true);
+

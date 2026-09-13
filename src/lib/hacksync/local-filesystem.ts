@@ -102,7 +102,9 @@ export function getStoredMemberFiles(projectId: string): MemberFile[] {
   if (typeof window === "undefined" || !projectId) return [];
   try {
     const raw = localStorage.getItem(`hacksync:member-files:${projectId}`);
-    return raw ? JSON.parse(raw) : [];
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
   }
@@ -121,7 +123,9 @@ export function getStoredLocalNodes(projectId: string): CodeNode[] {
   if (typeof window === "undefined" || !projectId) return [];
   try {
     const raw = localStorage.getItem(`hacksync:local-nodes:${projectId}`);
-    return raw ? JSON.parse(raw) : [];
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
   }

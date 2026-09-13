@@ -51,7 +51,13 @@ export interface CopilotMessage {
   role: "user" | "assistant" | "system";
   content: string;
   timestamp: string;
-  suggestedActions?: { label: string; action: string; payload?: unknown }[];
+  suggestedActions?: { label: string; action: string; payload?: unknown }[] | undefined;
+  intent?: string | undefined;
+  toolCalls?: { name: string; success: boolean; summary: string }[] | undefined;
+  findings?: import("./ai/types").AIFinding[] | undefined;
+  requestId?: string | undefined;
+  modelUsed?: string | undefined;
+  pendingApproval?: import("./ai/approval-gate").PendingApprovalRequest | undefined;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -136,6 +142,27 @@ export function analyzeCodeFile(node: CodeNode, ws: Workspace): CodeAnalysisResu
           "Use immutable updates like `[...items, newItem]` or `.slice()` / `.filter()` instead of mutating in place.",
         suggestedFix: `setItems((prev) => [...prev, newItem]);`,
       });
+    }
+
+    // Check for property access on potentially null/undefined user or entity before existence validation
+    if (/(?:user|account|member|record|profile)\.password\b/i.test(line)) {
+      const priorContext = lines.slice(Math.max(0, idx - 15), idx).join("\n");
+      const hasCheck = /if\s*\(\s*!(?:user|account|member|record|profile)\b|\bif\s*\(\s*(?:user|account|member|record|profile)\s*===?\s*null\b|\bif\s*\(\s*(?:user|account|member|record|profile)\s*===?\s*undefined\b/i.test(priorContext);
+
+      if (!hasCheck) {
+        bugs.push({
+          id: `bug-null-access-${idx}`,
+          line: lineNum,
+          snippet: line.trim(),
+          title: "Unchecked Property Access on Nullable Entity",
+          category: "logic",
+          severity: "critical",
+          description: `Entity property is accessed on line ${lineNum} before validating whether the preceding database query or function returned a non-null object. If the entity does not exist, this throws a TypeError and triggers an HTTP 500 Internal Server Error.`,
+          debuggingGuide:
+            "1. Check if entity is null/undefined before accessing its properties.\n2. Return a 401 Unauthorized or 404 Not Found error early.\n3. Wrap in a try/catch block.",
+          suggestedFix: `if (!user) {\n  return res.status(401).json({ error: "Invalid credentials" });\n}`,
+        });
+      }
     }
   });
 
@@ -259,12 +286,13 @@ export function analyzeCodeFile(node: CodeNode, ws: Workspace): CodeAnalysisResu
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Interactive Q&A / Workspace Copilot Engine
+// Interactive Q&A / Workspace Copilot Engine (Powered by AIOrchestrator)
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { queryLLM } from "./llm-provider";
 import { aiAssistantLimiter } from "@/lib/security/rate-limiter";
 import { metrics } from "@/lib/observability/metrics";
+import { AIOrchestrator } from "./ai/orchestrator";
+import { ApprovalGate } from "./ai/approval-gate";
 
 export async function askWorkspaceCopilot(
   userQuery: string,
@@ -291,17 +319,29 @@ export async function askWorkspaceCopilot(
     content: m.content,
   }));
 
-  const { text, providerUsed } = await queryLLM(userQuery, ws, activeNode, historyTuples, modelPreference);
+  const result = await AIOrchestrator.processQuery({
+    query: userQuery,
+    ws,
+    activeNode,
+    userId,
+    modelPreference,
+    chatHistory: historyTuples,
+  });
+
+  const pendingApprovals = ws ? ApprovalGate.getPendingForProject(ws.project.id) : [];
+  const latestPending = pendingApprovals.length > 0 ? pendingApprovals[pendingApprovals.length - 1] : undefined;
 
   return {
     id: `copilot-${Date.now()}`,
     role: "assistant",
     timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-    content: text,
-    suggestedActions: [
-      { label: "Copy Code", action: "copy" },
-      { label: "Cyber Security Scan", action: "security" },
-      { label: "API Contracts", action: "contracts" },
-    ],
+    content: result.text,
+    suggestedActions: result.suggestedActions,
+    intent: result.intent,
+    toolCalls: result.toolCalls,
+    findings: result.findings,
+    requestId: result.requestId,
+    modelUsed: result.modelUsed,
+    pendingApproval: latestPending,
   };
 }

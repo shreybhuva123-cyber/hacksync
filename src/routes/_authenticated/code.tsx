@@ -723,6 +723,7 @@ function CodeBody({ ws }: { ws: Workspace }) {
       {workspaceMode === "my_workspace" && (
         <MyWorkspaceView
           memberFiles={memberFiles}
+          sharedNodes={ws.codeNodes}
           currentUserId={user?.id ?? null}
           currentRole={currentRole}
           folderName={localDir.connected ? localDir.name : null}
@@ -758,45 +759,64 @@ function CodeBody({ ws }: { ws: Workspace }) {
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="font-semibold text-xs text-foreground">
-                      Vibe Coding Local Directory Sync
+                      Synchronized Codebase
                     </span>
-                    {localDir.connected ? (
-                      <span className="flex items-center gap-1 rounded bg-success/20 px-2 py-0.5 text-[10px] font-semibold text-success">
-                        <span className="size-1.5 rounded-full bg-success animate-pulse" />
-                        Connected ({localDir.name})
-                      </span>
-                    ) : (
-                      <span className="rounded bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-                        Disconnected
-                      </span>
-                    )}
+                    <StatusPill tone="success">Vibe Synced</StatusPill>
                   </div>
-                  <p className="text-[11px] text-muted-foreground mt-0.5">
-                    Universal local folder binding with live disk export.
+                  <p className="text-[11px] text-muted-foreground">
+                    Combined repository automatically verified with 3-way merge and full versioning.
                   </p>
                 </div>
               </div>
 
+              {/* Action Buttons */}
               <div className="flex flex-wrap items-center gap-2">
+                {/* 🔄 Trigger Multi-Member CodeSync */}
                 <button
                   type="button"
-                  onClick={handleConnectDirectory}
-                  disabled={isSyncing}
-                  className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:opacity-90 transition-opacity"
+                  onClick={() => setShowCodeSyncModal(true)}
+                  className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:opacity-90 transition-opacity shadow-sm"
                 >
-                  <Folder className="size-3.5" />
-                  {localDir.connected ? "Switch Local Folder" : "Connect Local Folder"}
+                  <RefreshCw className="size-3.5" />
+                  <span>CodeSync</span>
+                  {pendingSyncCount > 0 && (
+                    <span className="ml-1 rounded-full bg-background/20 px-1.5 py-0.2 text-[10px] font-bold">
+                      {pendingSyncCount}
+                    </span>
+                  )}
                 </button>
 
+                {/* 🚀 Direct GitHub Push */}
+                <button
+                  type="button"
+                  onClick={() => setShowGitHubPushModal(true)}
+                  className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-accent transition-colors shadow-sm"
+                >
+                  <Github className="size-3.5" />
+                  <span>Push to GitHub</span>
+                </button>
+
+                {/* 💾 Export Workspace as ZIP */}
+                <button
+                  type="button"
+                  onClick={handleDownloadZip}
+                  disabled={isExporting}
+                  className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-accent transition-colors shadow-sm disabled:opacity-50"
+                >
+                  {isExporting ? <Loader2 className="size-3.5 animate-spin" /> : <Download className="size-3.5" />}
+                  <span>Export ZIP</span>
+                </button>
+
+                {/* 💾 Disk Auto-Sync Button if Folder Connected */}
                 {localDir.connected && (
                   <button
                     type="button"
                     onClick={handlePushAllToDisk}
                     disabled={isSyncing}
-                    className="flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/20 transition-colors"
+                    className="flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/20 transition-colors shadow-sm disabled:opacity-50"
                   >
-                    <HardDrive className="size-3.5" />
-                    <span>Push to Disk</span>
+                    {isSyncing ? <Loader2 className="size-3.5 animate-spin" /> : <HardDrive className="size-3.5" />}
+                    <span>Sync to Disk</span>
                   </button>
                 )}
 
@@ -991,6 +1011,45 @@ function CodeBody({ ws }: { ws: Workspace }) {
                   }}
                   onBufferChange={setEditBuffer}
                   onSave={handleSaveContent}
+                  projectId={ws.project.id}
+                  currentUserName={currentUserName}
+                  currentUserRole={currentRole}
+                  onVersionRestored={(newVersion) => {
+                    setEditBuffer(newVersion.content);
+                    // Update in localNodes if present
+                    setLocalNodes((prev) =>
+                      prev.map((n) =>
+                        n.path === newVersion.file_path
+                          ? {
+                              ...n,
+                              content: newVersion.content,
+                              current_version_number: newVersion.version_number,
+                              content_hash: newVersion.content_hash,
+                            }
+                          : n,
+                      ),
+                    );
+                    // Also update Supabase code_nodes
+                    if (selected.id && !selected.id.startsWith("local-node-")) {
+                      update.mutate({
+                        table: "code_nodes",
+                        id: selected.id,
+                        values: {
+                          content: newVersion.content,
+                          current_version_number: newVersion.version_number,
+                          content_hash: newVersion.content_hash,
+                          last_synced_by: newVersion.created_by_name,
+                        },
+                      });
+                    }
+                    setSyncFeedback(`Restored version V${newVersion.version_number} for "${newVersion.file_path}"!`);
+                    void logActivity(
+                      ws.project.id,
+                      "code",
+                      `Restored ${newVersion.file_path} to version V${newVersion.version_number}`,
+                    );
+                    setTimeout(() => setSyncFeedback(null), 3500);
+                  }}
                 />
               )}
 
@@ -1044,6 +1103,7 @@ function CodeBody({ ws }: { ws: Workspace }) {
         onClose={() => setShowGitHubPushModal(false)}
         workspace={ws}
         currentUserName={currentUserName}
+        memberFiles={memberFiles}
       />
 
       {/* New File Modal */}

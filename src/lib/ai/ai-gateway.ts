@@ -10,8 +10,26 @@ interface Bucket {
 const rateLimitMap = new Map<string, Bucket>();
 const MAX_TOKENS = 12;
 const REFILL_RATE_MS = 60_000 / 12; // 1 token every 5 seconds
+const STALE_ENTRY_TTL_MS = 10 * 60_000; // 10 minutes
+let evictionCounter = 0;
+
+/** Purge stale entries that haven't been accessed in 10+ minutes */
+function evictStaleEntries(): void {
+  const now = Date.now();
+  for (const [key, bucket] of rateLimitMap) {
+    if (now - bucket.lastRefill > STALE_ENTRY_TTL_MS) {
+      rateLimitMap.delete(key);
+    }
+  }
+}
 
 export function checkRateLimit(clientKey: string): void {
+  // Periodically evict stale entries to prevent unbounded memory growth
+  evictionCounter++;
+  if (evictionCounter % 100 === 0) {
+    evictStaleEntries();
+  }
+
   const now = Date.now();
   const bucket = rateLimitMap.get(clientKey) ?? { tokens: MAX_TOKENS, lastRefill: now };
 

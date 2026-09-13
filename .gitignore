@@ -40,3 +40,4 @@ dist-ssr
 # Build artifacts & archives
 *.zip
 *.tsbuildinfo
+scratch/*.png

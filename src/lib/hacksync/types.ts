@@ -45,6 +45,11 @@ export interface CodeNode {
   language: string | null;
   content: string | null;
   updated_at: string;
+  current_version_number?: number;
+  content_hash?: string;
+  last_synced_by?: string;
+  contributors?: string[];
+  is_deleted?: boolean;
 }
 
 export interface ApiContract {
@@ -224,7 +229,14 @@ export interface UserProject {
   member_count?: number;
 }
 
-export type FileSyncStatus = "synced" | "pending_upload" | "local_modified" | "conflict" | "unlinked";
+export type FileSyncStatus =
+  | "synced"
+  | "pending_upload"
+  | "local_modified"
+  | "behind"
+  | "diverged"
+  | "conflict"
+  | "unlinked";
 
 export interface MemberFile {
   id: string;
@@ -241,6 +253,77 @@ export interface MemberFile {
   last_modified: string;
   created_at: string;
   updated_at: string;
+  base_version_number?: number;
+  base_content?: string | null;
+  base_hash?: string | null;
+  content_hash?: string | null;
+  is_deleted?: boolean;
+}
+
+export type VersionChangeType =
+  | "initial"
+  | "edit"
+  | "auto_merge"
+  | "manual_merge"
+  | "rollback"
+  | "delete";
+
+export interface FileVersion {
+  id: string;
+  project_id: string;
+  file_path: string;
+  node_id?: string | null | undefined;
+  version_number: number;
+  content: string;
+  content_hash: string;
+  base_version_number?: number | null | undefined;
+  parent_version_number?: number | null | undefined;
+  created_by_user_id?: string | null | undefined;
+  created_by_name: string;
+  created_by_role?: Role | null | undefined;
+  contributors: string[];
+  change_summary: string;
+  change_type: VersionChangeType;
+  created_at: string;
+}
+
+export interface LineDiffItem {
+  type: "added" | "removed" | "modified" | "unchanged" | "conflict";
+  oldLineNumber?: number | undefined;
+  newLineNumber?: number | undefined;
+  content: string;
+  tag?: string | undefined;
+}
+
+export interface MergeConflictHunk {
+  id: string;
+  startLine: number;
+  baseChunk: string;
+  contributorChunks: Record<string, string>; // memberIdentifier -> code
+  resolvedChunk?: string | undefined;
+  isResolved: boolean;
+}
+
+export interface MemberContribution {
+  fileId: string;
+  userId: string | null;
+  memberId: string | null;
+  memberName: string;
+  role: Role;
+  content: string;
+  lastModified?: string | undefined;
+  baseVersionNumber?: number | undefined;
+  isDeleted?: boolean | undefined;
+}
+
+export interface MergeResult {
+  hasConflict: boolean;
+  mergedContent: string;
+  conflicts: MergeConflictHunk[];
+  autoMergedHunksCount: number;
+  contributors: string[];
+  isIdenticalToExisting: boolean;
+  rawConflictMarkers?: string | undefined;
 }
 
 export interface CodeSyncPreviewItem {
@@ -251,34 +334,66 @@ export interface CodeSyncPreviewItem {
   ownerRole: Role;
   ownerName: string;
   ownerUserId: string | null;
-  changeType: "added" | "modified" | "unchanged" | "deleted";
+  changeType: "added" | "modified" | "auto_merged" | "unchanged" | "deleted";
   content: string | null;
   previousContent: string | null;
+  baseContent?: string | null | undefined;
+  baseVersionNumber?: number | undefined;
+  sharedVersionNumber?: number | undefined;
   language: string;
   isConflict: boolean;
+  contributors?: string[] | undefined;
+  conflictType?: "overlapping_edit" | "deletion_vs_modification" | "creation_collision" | undefined;
   conflictDetails?: {
     otherOwnerName: string;
     otherOwnerRole: Role;
     otherContent: string;
-  };
+    allContributors?: string[] | undefined;
+  } | undefined;
+}
+
+export interface ConflictResolution {
+  choice:
+    | "versionA"
+    | "versionB"
+    | "manual"
+    | "use_base"
+    | "combine"
+    | "keep_deleted"
+    | "keep_modified"
+    | "restore_merge";
+  customContent?: string | undefined;
 }
 
 export interface CodeSyncConflict {
   path: string;
+  conflictType: "overlapping_edit" | "deletion_vs_modification" | "creation_collision";
+  baseVersionNumber?: number | undefined;
+  baseContent: string;
+  files: MemberFile[];
   fileA: MemberFile;
   fileB: MemberFile;
-  resolution?: "keep_a" | "keep_b" | "manual";
-  mergedContent?: string;
+  rawConflictMarkers?: string | undefined;
+  hunks?: MergeConflictHunk[] | undefined;
+  resolution?: ConflictResolution | undefined;
+  mergedContent?: string | undefined;
 }
 
 export interface SyncSession {
   id: string;
   project_id: string;
+  session_number?: number;
   synced_by: string | null;
   actor_name: string;
   actor_role: string;
   files_count: number;
   conflicts_resolved: number;
+  auto_merged_count?: number;
+  conflicts_count?: number;
+  new_files_count?: number;
+  deleted_files_count?: number;
+  contributors?: string[];
+  status?: "completed" | "in_progress" | "conflict_pending" | "failed";
   summary: Record<string, any>;
   created_at: string;
 }
@@ -294,4 +409,5 @@ export interface GitHubPushRecord {
   author_name: string | null;
   created_at: string;
 }
+
 

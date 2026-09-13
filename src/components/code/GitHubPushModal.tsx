@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   AlertCircle,
   AlertTriangle,
@@ -19,13 +19,15 @@ import {
   X,
 } from "lucide-react";
 import { githubService, type GitHubRepoInfo, type GitHubPushResult } from "@/lib/services/github.service";
-import type { CodeNode, Workspace } from "@/lib/hacksync/types";
+import { codeSyncService } from "@/lib/services/codesync.service";
+import type { CodeNode, Workspace, MemberFile } from "@/lib/hacksync/types";
 
 interface GitHubPushModalProps {
   isOpen: boolean;
   onClose: () => void;
   workspace: Workspace;
   currentUserName: string;
+  memberFiles?: MemberFile[];
 }
 
 export function GitHubPushModal({
@@ -33,6 +35,7 @@ export function GitHubPushModal({
   onClose,
   workspace,
   currentUserName,
+  memberFiles = [],
 }: GitHubPushModalProps) {
   const [repoUrl, setRepoUrl] = useState(workspace.project.repo_url || "");
   const [branch, setBranch] = useState(workspace.project.default_branch || "main");
@@ -48,6 +51,57 @@ export function GitHubPushModal({
   const [isPushing, setIsPushing] = useState(false);
   const [pushResult, setPushResult] = useState<GitHubPushResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Check for unresolved CodeSync conflicts or conflict markers in shared code (Requirements #23, #24)
+  const conflictCheck = useMemo(() => {
+    const filesWithMarkers = workspace.codeNodes.filter(
+      (n) =>
+        n.kind === "file" &&
+        n.content &&
+        (n.content.includes("<<<<<<<") || n.content.includes(">>>>>>>")),
+    );
+
+    let stagedConflictsCount = 0;
+    if (memberFiles && memberFiles.length > 0) {
+      try {
+        const preview = codeSyncService.buildCodeSyncPreview(
+          workspace.project.id,
+          memberFiles,
+          workspace.codeNodes,
+          workspace.members,
+        );
+        stagedConflictsCount = preview.conflicts.length;
+      } catch (err) {
+        console.warn("Error running conflict check for GitHub Push", err);
+      }
+    }
+
+    const hasConflicts = stagedConflictsCount > 0 || filesWithMarkers.length > 0;
+    return {
+      hasConflicts,
+      stagedConflictsCount,
+      markerFilesCount: filesWithMarkers.length,
+      filesWithMarkers: filesWithMarkers.map((f) => f.path),
+    };
+  }, [workspace.codeNodes, workspace.members, workspace.project.id, memberFiles]);
+
+  // Aggregate contributors to provide automated commit attribution
+  const contributors = useMemo(() => {
+    const set = new Set<string>();
+    for (const n of workspace.codeNodes) {
+      if (n.contributors) {
+        for (const c of n.contributors) if (c) set.add(c);
+      }
+      if (n.last_synced_by) set.add(n.last_synced_by);
+    }
+    return Array.from(set);
+  }, [workspace.codeNodes]);
+
+  useEffect(() => {
+    if (contributors.length > 0) {
+      setCommitMessage(`CodeSync: Merged contributions from ${contributors.join(", ")}`);
+    }
+  }, [contributors]);
 
   // Load stored GitHub token from session storage if available
   useEffect(() => {
@@ -299,6 +353,34 @@ export function GitHubPushModal({
                 </p>
               </div>
 
+              {/* Conflict Blocking Banner (Requirements #23, #24) */}
+              {conflictCheck.hasConflicts && (
+                <div className="flex items-start gap-3 rounded-xl border border-destructive/40 bg-destructive/10 p-3.5 text-xs text-destructive">
+                  <AlertTriangle className="size-5 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <h5 className="font-bold text-destructive">
+                      GitHub Push Blocked: Unresolved CodeSync Conflicts
+                    </h5>
+                    <p className="text-foreground/80 leading-relaxed text-[11px]">
+                      {conflictCheck.stagedConflictsCount > 0 && (
+                        <span>
+                          There {conflictCheck.stagedConflictsCount === 1 ? "is" : "are"}{" "}
+                          <b>{conflictCheck.stagedConflictsCount}</b> active file conflict
+                          {conflictCheck.stagedConflictsCount === 1 ? "" : "s"} across team members.{" "}
+                        </span>
+                      )}
+                      {conflictCheck.markerFilesCount > 0 && (
+                        <span>
+                          <b>{conflictCheck.markerFilesCount}</b> file
+                          {conflictCheck.markerFilesCount === 1 ? "" : "s"} in the shared codebase contain unresolved merge conflict markers (<code>&lt;&lt;&lt;&lt;&lt;&lt;&lt;</code>).
+                        </span>
+                      )}
+                      {" "}Please resolve all conflicts using CodeSync before pushing to GitHub to prevent corrupting remote branch history.
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {/* Files Summary */}
               <div className="rounded-xl border border-primary/20 bg-primary/5 p-3 flex items-center justify-between text-xs">
                 <span className="text-muted-foreground">Synchronized Files Ready to Push:</span>
@@ -316,15 +398,26 @@ export function GitHubPushModal({
                 </button>
                 <button
                   type="submit"
-                  disabled={isPushing}
-                  className="flex items-center gap-1.5 rounded-lg bg-primary px-5 py-2 text-xs font-bold text-primary-foreground hover:opacity-90 shadow-md transition-opacity disabled:opacity-50"
+                  disabled={isPushing || conflictCheck.hasConflicts}
+                  title={conflictCheck.hasConflicts ? "Push is blocked until all conflicts are resolved" : undefined}
+                  className={`flex items-center gap-1.5 rounded-lg px-5 py-2 text-xs font-bold transition-opacity shadow-md ${
+                    conflictCheck.hasConflicts
+                      ? "bg-muted text-muted-foreground cursor-not-allowed border border-border opacity-70"
+                      : "bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50"
+                  }`}
                 >
                   {isPushing ? (
                     <Loader2 className="size-3.5 animate-spin" />
+                  ) : conflictCheck.hasConflicts ? (
+                    <AlertTriangle className="size-3.5 text-destructive" />
                   ) : (
                     <UploadCloud className="size-3.5" />
                   )}
-                  <span>Push {fileNodes.length} Files to GitHub</span>
+                  <span>
+                    {conflictCheck.hasConflicts
+                      ? "Push Blocked (Resolve Conflicts First)"
+                      : `Push ${fileNodes.length} Files to GitHub`}
+                  </span>
                 </button>
               </div>
             </form>

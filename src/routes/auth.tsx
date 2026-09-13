@@ -220,6 +220,25 @@ function AuthPage() {
             <ArrowRight className="size-3.5" />
           </Link>
 
+          {/* Quick Demo Access for Testing & Judges */}
+          <button
+            type="button"
+            onClick={() => {
+              if (typeof window !== "undefined") {
+                localStorage.setItem("hacksync:demo_auth", "true");
+                localStorage.setItem("hacksync:active-project-id", "demo-sandbox-project");
+              }
+              void navigate({ to: (redirectTo as any) || "/code" });
+            }}
+            className="flex w-full items-center justify-between rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-3 text-xs font-semibold text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 transition-colors shadow-sm"
+          >
+            <div className="flex items-center gap-2">
+              <Zap className="size-4 fill-emerald-500 text-emerald-500" />
+              <span>Fast Judge & Evaluation Access (Full App)</span>
+            </div>
+            <ArrowRight className="size-3.5" />
+          </button>
+
           {/* Mode Switcher */}
           <div className="grid grid-cols-3 gap-1 rounded-lg bg-muted p-1">
             {(["signin", "signup", "reset"] as const).map((m) => (

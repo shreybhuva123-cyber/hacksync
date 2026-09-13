@@ -58,10 +58,20 @@ export function useAuth(): AuthState {
     };
   }, []);
 
+  const isDemo = typeof window !== "undefined" && localStorage.getItem("hacksync:demo_auth") === "true";
+  const demoUser: User = {
+    id: "demo-judge-user",
+    email: "judge@hacksync.dev",
+    app_metadata: {},
+    user_metadata: { display_name: "Hackathon Judge" },
+    aud: "authenticated",
+    created_at: new Date().toISOString(),
+  };
+
   return {
-    session,
-    user: session?.user ?? null,
-    loading,
+    session: session ?? (isDemo ? ({ user: demoUser } as Session) : null),
+    user: session?.user ?? (isDemo ? demoUser : null),
+    loading: isDemo ? false : loading,
     error,
   };
 }
@@ -69,6 +79,7 @@ export function useAuth(): AuthState {
 export async function signOut(): Promise<void> {
   try {
     if (typeof window !== "undefined") {
+      localStorage.removeItem("hacksync:demo_auth");
       localStorage.removeItem("hacksync:demo-mode");
       localStorage.removeItem("hacksync:active-project-id");
     }

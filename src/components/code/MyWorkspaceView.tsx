@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback } from "react";
 import {
   AlertCircle,
+  AlertTriangle,
   Check,
   Clock,
   Download,
@@ -17,6 +18,11 @@ import {
   Trash2,
   UploadCloud,
   Zap,
+  Split,
+  Eye,
+  ShieldAlert,
+  ArrowDownCircle,
+  X,
 } from "lucide-react";
 import { CopyButton, RoleBadge, StatusPill } from "@/components/hacksync/primitives";
 import {
@@ -25,11 +31,13 @@ import {
   downloadSingleFile,
   readDataTransferEntries,
 } from "@/lib/hacksync/local-filesystem";
+import { computeFastHash, computeLineDiff } from "@/lib/hacksync/merge-engine";
 import { ROLES, type Role } from "@/lib/constants/roles";
-import type { MemberFile, FileSyncStatus, Area } from "@/lib/hacksync/types";
+import type { MemberFile, FileSyncStatus, Area, CodeNode } from "@/lib/hacksync/types";
 
 interface MyWorkspaceViewProps {
   memberFiles: MemberFile[];
+  sharedNodes?: CodeNode[];
   currentUserId: string | null;
   currentRole: Role;
   folderName?: string | null;
@@ -41,8 +49,14 @@ interface MyWorkspaceViewProps {
   onOpenCodeSync: () => void;
 }
 
+interface UpdateSafetyModalState {
+  file: MemberFile;
+  sharedNode: CodeNode;
+}
+
 export function MyWorkspaceView({
   memberFiles,
+  sharedNodes = [],
   currentUserId,
   currentRole,
   folderName,
@@ -60,9 +74,73 @@ export function MyWorkspaceView({
   const [searchQuery, setSearchQuery] = useState("");
   const [feedback, setFeedback] = useState<string | null>(null);
 
-  // Filter to current member's personal files
+  // Safety update confirmation modal state (Requirement #21)
+  const [safetyModal, setSafetyModal] = useState<UpdateSafetyModalState | null>(null);
+  // Review Diff modal state (Requirement #20)
+  const [reviewDiffFile, setReviewDiffFile] = useState<{
+    file: MemberFile;
+    sharedNode: CodeNode;
+  } | null>(null);
+
+  // Index shared nodes by clean path
+  const sharedMap = useMemo(() => {
+    const map = new Map<string, CodeNode>();
+    for (const node of sharedNodes) {
+      if (node.kind === "file") {
+        const clean = node.path.replace(/^\/+/, "").replace(/\\/g, "/");
+        map.set(clean, node);
+      }
+    }
+    return map;
+  }, [sharedNodes]);
+
+  // Compute live sync status for each file relative to shared project
+  const computedFiles = useMemo(() => {
+    return memberFiles.map((file) => {
+      const cleanPath = file.relative_path.replace(/^\/+/, "").replace(/\\/g, "/");
+      const shared = sharedMap.get(cleanPath);
+
+      const localHash = computeFastHash(file.content || "");
+      const baseVersion = file.base_version_number || 1;
+      const sharedVersion = shared?.current_version_number || 1;
+      const sharedHash = shared?.content ? computeFastHash(shared.content) : null;
+
+      let computedStatus: FileSyncStatus = file.sync_status;
+      let isBehind = false;
+      let hasLocalEdits = false;
+
+      if (!shared) {
+        computedStatus = "local_modified";
+      } else {
+        const baseContent = file.base_content ?? "";
+        const baseHash = file.base_hash || (baseContent ? computeFastHash(baseContent) : null);
+        hasLocalEdits = baseHash ? localHash !== baseHash : localHash !== sharedHash;
+
+        if (sharedHash === localHash) {
+          computedStatus = "synced";
+        } else if (sharedVersion > baseVersion) {
+          isBehind = true;
+          computedStatus = hasLocalEdits ? "diverged" : "behind";
+        } else {
+          computedStatus = hasLocalEdits ? "local_modified" : "synced";
+        }
+      }
+
+      return {
+        ...file,
+        computedStatus,
+        isBehind,
+        hasLocalEdits,
+        sharedVersion,
+        baseVersion,
+        sharedNode: shared,
+      };
+    });
+  }, [memberFiles, sharedMap]);
+
+  // Filter to matching track and search query
   const myFiles = useMemo(() => {
-    return memberFiles.filter((f) => {
+    return computedFiles.filter((f) => {
       if (filterTrack !== "all" && f.owner_role !== filterTrack) return false;
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
@@ -73,10 +151,14 @@ export function MyWorkspaceView({
       }
       return true;
     });
-  }, [memberFiles, filterTrack, searchQuery]);
+  }, [computedFiles, filterTrack, searchQuery]);
 
-  const pendingCount = memberFiles.filter(
-    (f) => f.sync_status === "local_modified" || f.sync_status === "pending_upload",
+  const pendingCount = computedFiles.filter(
+    (f) => f.computedStatus === "local_modified" || f.computedStatus === "diverged",
+  ).length;
+
+  const behindCount = computedFiles.filter(
+    (f) => f.computedStatus === "behind" || f.computedStatus === "diverged",
   ).length;
 
   // Single File Linker
@@ -90,6 +172,7 @@ export function MyWorkspaceView({
       }
 
       const defaultRole = currentRole === "owner" ? "lead" : currentRole;
+      const contentHash = computeFastHash(picked.content);
 
       onAddFiles([
         {
@@ -104,6 +187,10 @@ export function MyWorkspaceView({
           content: picked.content,
           sync_status: "local_modified",
           last_modified: new Date(picked.lastModified).toISOString(),
+          base_version_number: 1,
+          base_content: picked.content,
+          base_hash: contentHash,
+          content_hash: contentHash,
         },
       ]);
 
@@ -132,26 +219,33 @@ export function MyWorkspaceView({
 
       const defaultRole = currentRole === "owner" ? "lead" : currentRole;
 
-      const newFiles = res.files.map((f) => ({
-        project_id: "",
-        user_id: currentUserId,
-        member_id: null,
-        owner_role:
-          f.area === "frontend"
-            ? "frontend"
-            : f.area === "backend"
-              ? "backend"
-              : f.area === "database"
-                ? "database"
-                : defaultRole,
-        file_name: f.name,
-        relative_path: f.path,
-        file_type: "text/plain",
-        language: f.language,
-        content: f.content || "",
-        sync_status: "local_modified" as FileSyncStatus,
-        last_modified: new Date(f.lastModified).toISOString(),
-      }));
+      const newFiles = res.files.map((f) => {
+        const hash = computeFastHash(f.content || "");
+        return {
+          project_id: "",
+          user_id: currentUserId,
+          member_id: null,
+          owner_role:
+            f.area === "frontend"
+              ? "frontend"
+              : f.area === "backend"
+                ? "backend"
+                : f.area === "database"
+                  ? "database"
+                  : defaultRole,
+          file_name: f.name,
+          relative_path: f.path,
+          file_type: "text/plain",
+          language: f.language,
+          content: f.content || "",
+          sync_status: "local_modified" as FileSyncStatus,
+          last_modified: new Date(f.lastModified).toISOString(),
+          base_version_number: 1,
+          base_content: f.content || "",
+          base_hash: hash,
+          content_hash: hash,
+        };
+      });
 
       onAddFiles(newFiles);
       setFeedback(`Linked ${newFiles.length} files from folder "${res.name}"!`);
@@ -178,26 +272,33 @@ export function MyWorkspaceView({
           const res = await readDataTransferEntries(e.dataTransfer);
           if (res && res.files.length > 0) {
             const defaultRole = currentRole === "owner" ? "lead" : currentRole;
-            const newFiles = res.files.map((f) => ({
-              project_id: "",
-              user_id: currentUserId,
-              member_id: null,
-              owner_role:
-                f.area === "frontend"
-                  ? "frontend"
-                  : f.area === "backend"
-                    ? "backend"
-                    : f.area === "database"
-                      ? "database"
-                      : defaultRole,
-              file_name: f.name,
-              relative_path: f.path,
-              file_type: "text/plain",
-              language: f.language,
-              content: f.content || "",
-              sync_status: "local_modified" as FileSyncStatus,
-              last_modified: new Date(f.lastModified).toISOString(),
-            }));
+            const newFiles = res.files.map((f) => {
+              const hash = computeFastHash(f.content || "");
+              return {
+                project_id: "",
+                user_id: currentUserId,
+                member_id: null,
+                owner_role:
+                  f.area === "frontend"
+                    ? "frontend"
+                    : f.area === "backend"
+                      ? "backend"
+                      : f.area === "database"
+                        ? "database"
+                        : defaultRole,
+                file_name: f.name,
+                relative_path: f.path,
+                file_type: "text/plain",
+                language: f.language,
+                content: f.content || "",
+                sync_status: "local_modified" as FileSyncStatus,
+                last_modified: new Date(f.lastModified).toISOString(),
+                base_version_number: 1,
+                base_content: f.content || "",
+                base_hash: hash,
+                content_hash: hash,
+              };
+            });
             onAddFiles(newFiles);
             setFeedback(`Imported ${newFiles.length} files from dropped folder "${res.name}"!`);
             setTimeout(() => setFeedback(null), 3500);
@@ -212,18 +313,82 @@ export function MyWorkspaceView({
     [currentRole, currentUserId, onAddFiles],
   );
 
-  const statusToneMap: Record<FileSyncStatus, "success" | "warning" | "danger" | "neutral"> = {
+  // Safe Local File Update Handler (Requirement #20 & #21)
+  const handleRequestLocalUpdate = (file: MemberFile, sharedNode: CodeNode) => {
+    const localHash = computeFastHash(file.content || "");
+    const baseHash = file.base_hash || (file.base_content ? computeFastHash(file.base_content) : null);
+    const hasUncommittedChanges = baseHash ? localHash !== baseHash : localHash !== computeFastHash(sharedNode.content || "");
+
+    if (!hasUncommittedChanges) {
+      // Safe to update directly!
+      executeLocalUpdate(file.id, sharedNode.content || "", sharedNode.current_version_number || 1);
+      setFeedback(`Updated "${file.file_name}" to latest shared version V${sharedNode.current_version_number || 1}`);
+      setTimeout(() => setFeedback(null), 3500);
+    } else {
+      // Trigger Safety Dialog! (Requirement #21)
+      setSafetyModal({ file, sharedNode });
+    }
+  };
+
+  const executeLocalUpdate = (fileId: string, newContent: string, newVersionNumber: number) => {
+    const hash = computeFastHash(newContent);
+    onUpdateFile(fileId, {
+      content: newContent,
+      base_content: newContent,
+      base_version_number: newVersionNumber,
+      base_hash: hash,
+      content_hash: hash,
+      sync_status: "synced",
+      last_modified: new Date().toISOString(),
+    });
+    setSafetyModal(null);
+  };
+
+  const handleBackupAndUpdate = () => {
+    if (!safetyModal) return;
+    const { file, sharedNode } = safetyModal;
+
+    // Create a local backup file first
+    const backupFileName = `${file.file_name}.local_backup_v${file.base_version_number || 1}`;
+    const backupPath = `${file.relative_path}.bak`;
+    onAddFiles([
+      {
+        project_id: file.project_id,
+        user_id: currentUserId,
+        member_id: file.member_id,
+        owner_role: file.owner_role,
+        file_name: backupFileName,
+        relative_path: backupPath,
+        file_type: "text/plain",
+        language: file.language,
+        content: file.content,
+        sync_status: "unlinked",
+        last_modified: new Date().toISOString(),
+      },
+    ]);
+
+    // Update local file with shared version
+    executeLocalUpdate(file.id, sharedNode.content || "", sharedNode.current_version_number || 1);
+    setFeedback(`Created backup "${backupFileName}" and updated file to shared V${sharedNode.current_version_number || 1}`);
+    setTimeout(() => setFeedback(null), 4000);
+  };
+
+  const statusToneMap: Record<FileSyncStatus, "success" | "warning" | "danger" | "neutral" | "primary"> = {
     synced: "success",
     local_modified: "warning",
     pending_upload: "warning",
+    behind: "primary",
+    diverged: "danger",
     conflict: "danger",
     unlinked: "neutral",
   };
 
   const statusLabelMap: Record<FileSyncStatus, string> = {
-    synced: "✓ Synced",
-    local_modified: "● Local Changes",
+    synced: "✓ Up to date",
+    local_modified: "↑ Local Changes",
     pending_upload: "↑ Pending Sync",
+    behind: "↓ Shared Changes (Behind)",
+    diverged: "↔ Changes to Merge",
     conflict: "⚠ Conflict",
     unlinked: "✕ Unlinked",
   };
@@ -252,8 +417,13 @@ export function MyWorkspaceView({
               <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
                 <span>My Local Workspace</span>
                 <span className="rounded bg-primary/15 px-2 py-0.5 text-[11px] font-bold text-primary">
-                  {memberFiles.length} linked files
+                  {computedFiles.length} linked files
                 </span>
+                {behindCount > 0 && (
+                  <span className="rounded bg-primary/20 px-2 py-0.5 text-[10px] font-bold text-primary animate-pulse">
+                    ↓ {behindCount} behind shared
+                  </span>
+                )}
                 {folderName && (
                   <span className="rounded bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
                     📁 {folderName}
@@ -261,7 +431,7 @@ export function MyWorkspaceView({
                 )}
               </h3>
               <p className="text-xs text-muted-foreground">
-                Your private staged files from your computer. These remain local on your machine until you execute CodeSync.
+                Your private staged files. Compare changes with the shared project or execute CodeSync to merge.
               </p>
             </div>
           </div>
@@ -298,14 +468,14 @@ export function MyWorkspaceView({
             <button
               type="button"
               onClick={onOpenCodeSync}
-              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition-all shadow-sm ${
+              className={`flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-bold transition-all shadow-sm ${
                 pendingCount > 0
                   ? "bg-amber-500 hover:bg-amber-600 text-black animate-pulse"
                   : "bg-secondary text-secondary-foreground border border-border hover:bg-accent"
               }`}
             >
               <Zap className="size-3.5" />
-              <span>⚡ CodeSync ({pendingCount} pending)</span>
+              <span>⚡ CodeSync ({pendingCount} to merge)</span>
             </button>
           </div>
         </div>
@@ -366,36 +536,18 @@ export function MyWorkspaceView({
               Click <b className="text-foreground">📁 Link Local Folder</b>, <b className="text-foreground">+ Link Single File</b>, or simply <b className="text-primary">drag & drop a folder here</b>.
             </p>
           </div>
-          <div className="flex justify-center gap-2 pt-2">
-            <button
-              type="button"
-              onClick={handleLinkFolder}
-              disabled={isLinkingFolder}
-              className="flex items-center gap-1.5 rounded-lg bg-primary px-3.5 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90 shadow-sm"
-            >
-              <Folder className="size-3.5" />
-              <span>📁 Link Local Folder</span>
-            </button>
-            <button
-              type="button"
-              onClick={handleLinkSingleFile}
-              disabled={isLinkingFile}
-              className="flex items-center gap-1.5 rounded-lg border border-border bg-secondary px-3.5 py-2 text-xs font-semibold text-foreground hover:bg-accent"
-            >
-              <Plus className="size-3.5" />
-              <span>Link Single File</span>
-            </button>
-          </div>
         </div>
       ) : (
-        <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {myFiles.map((file) => {
             const isSelected = file.id === selectedFileId;
+            const sharedNode = file.sharedNode;
+
             return (
               <div
                 key={file.id}
                 onClick={() => onSelectFile(file)}
-                className={`group flex flex-col justify-between rounded-xl border p-3.5 cursor-pointer transition-all ${
+                className={`group flex flex-col justify-between rounded-xl border p-4 cursor-pointer transition-all ${
                   isSelected
                     ? "border-primary bg-primary/10 shadow-md ring-1 ring-primary/40"
                     : "border-border bg-card hover:border-border hover:bg-accent/40"
@@ -409,14 +561,52 @@ export function MyWorkspaceView({
                         {file.file_name}
                       </span>
                     </div>
-                    <StatusPill tone={statusToneMap[file.sync_status]}>
-                      {statusLabelMap[file.sync_status]}
+                    <StatusPill tone={statusToneMap[file.computedStatus]}>
+                      {statusLabelMap[file.computedStatus]}
                     </StatusPill>
                   </div>
 
                   <p className="mono mt-1 truncate text-[11px] text-muted-foreground">
                     {file.relative_path}
                   </p>
+
+                  {/* Warning: Local version is behind shared version (Requirement #20) */}
+                  {file.isBehind && sharedNode && (
+                    <div className="mt-2.5 rounded-lg border border-primary/30 bg-primary/10 p-2 text-xs space-y-1.5">
+                      <div className="flex items-center justify-between gap-2 text-primary font-bold text-[11px]">
+                        <span className="flex items-center gap-1">
+                          <AlertTriangle className="size-3.5 shrink-0" />
+                          <span>Local is behind shared version</span>
+                        </span>
+                        <span className="mono font-semibold text-[10px]">
+                          V{file.baseVersion} → V{file.sharedVersion}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 pt-0.5">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setReviewDiffFile({ file, sharedNode });
+                          }}
+                          className="rounded border border-primary/40 bg-background px-2 py-0.5 text-[10px] font-semibold text-foreground hover:bg-accent"
+                        >
+                          Review Diff
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRequestLocalUpdate(file, sharedNode);
+                          }}
+                          className="rounded bg-primary px-2 py-0.5 text-[10px] font-bold text-primary-foreground hover:opacity-90"
+                        >
+                          Update Local File
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="mt-3 flex items-center justify-between border-t border-border/60 pt-2.5 text-[10px] text-muted-foreground">
@@ -453,6 +643,157 @@ export function MyWorkspaceView({
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Requirement #21: Local Update Safety Confirmation Modal */}
+      {safetyModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm animate-in fade-in">
+          <div className="relative w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5 text-amber-500 font-bold text-sm">
+                <ShieldAlert className="size-5 shrink-0" />
+                <span>Local Update Safety Gate</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSafetyModal(null)}
+                className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-xs text-foreground font-semibold">
+                Shared version is newer (V{safetyModal.sharedNode.current_version_number || 1}), but your local file <code className="mono text-primary font-bold">{safetyModal.file.file_name}</code> has uncommitted changes.
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Updating directly would replace your current modifications. How would you like to proceed?
+              </p>
+            </div>
+
+            <div className="space-y-2 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const state = safetyModal;
+                  setSafetyModal(null);
+                  setReviewDiffFile({ file: state.file, sharedNode: state.sharedNode });
+                }}
+                className="w-full flex items-center justify-center gap-1.5 rounded-lg border border-border bg-secondary p-2 text-xs font-semibold text-foreground hover:bg-accent"
+              >
+                <Eye className="size-3.5 text-primary" />
+                <span>[Review Diff] Compare Local vs Shared</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleBackupAndUpdate}
+                className="w-full flex items-center justify-center gap-1.5 rounded-lg bg-primary p-2 text-xs font-bold text-primary-foreground hover:opacity-90 shadow-sm"
+              >
+                <HardDrive className="size-3.5" />
+                <span>[Backup Local + Update] Safe Recommended</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSafetyModal(null)}
+                className="w-full flex items-center justify-center gap-1.5 rounded-lg border border-border bg-background p-2 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+              >
+                <span>[Keep Local] Dismiss and keep my uncommitted edits</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Requirement #20: Review Diff Modal */}
+      {reviewDiffFile && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm animate-in fade-in">
+          <div className="relative flex max-h-[90vh] w-full max-w-4xl flex-col rounded-2xl border border-border bg-card shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between border-b border-border p-4 bg-muted/20">
+              <div className="flex items-center gap-2">
+                <Split className="size-4 text-primary" />
+                <span className="mono text-xs font-bold text-foreground">
+                  Diff Inspection: {reviewDiffFile.file.relative_path}
+                </span>
+                <span className="mono rounded bg-primary/20 px-2 py-0.5 text-[10px] font-bold text-primary">
+                  Local (V{reviewDiffFile.file.base_version_number || 1}) vs Shared (V{reviewDiffFile.sharedNode.current_version_number || 1})
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReviewDiffFile(null)}
+                className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-lg border border-border bg-background p-3 space-y-1">
+                  <span className="text-xs font-bold text-muted-foreground">My Local Version</span>
+                  <pre className="mono max-h-64 overflow-y-auto rounded bg-muted/30 p-2 text-[11px] leading-relaxed text-foreground">
+                    {reviewDiffFile.file.content || "(empty)"}
+                  </pre>
+                </div>
+
+                <div className="rounded-lg border border-primary/30 bg-background p-3 space-y-1">
+                  <span className="text-xs font-bold text-primary">Shared Project Version</span>
+                  <pre className="mono max-h-64 overflow-y-auto rounded bg-muted/30 p-2 text-[11px] leading-relaxed text-foreground">
+                    {reviewDiffFile.sharedNode.content || "(empty)"}
+                  </pre>
+                </div>
+              </div>
+
+              {/* Line Diff */}
+              <div className="space-y-1 pt-2">
+                <span className="text-xs font-bold text-foreground">Line-by-Line Changes</span>
+                <div className="max-h-48 overflow-y-auto rounded-lg border border-border bg-background p-2 font-mono text-[11px]">
+                  {computeLineDiff(reviewDiffFile.file.content || "", reviewDiffFile.sharedNode.content || "").map((diff, dIdx) => (
+                    <div
+                      key={dIdx}
+                      className={`px-2 py-0.5 flex gap-2 ${
+                        diff.type === "added"
+                          ? "bg-success/15 text-success"
+                          : diff.type === "removed"
+                            ? "bg-destructive/15 text-destructive"
+                            : "text-muted-foreground"
+                      }`}
+                    >
+                      <span className="w-5 text-right select-none opacity-60">
+                        {diff.type === "added" ? "+" : diff.type === "removed" ? "-" : " "}
+                      </span>
+                      <span className="truncate">{diff.content}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between border-t border-border p-4 bg-muted/20">
+              <button
+                type="button"
+                onClick={() => setReviewDiffFile(null)}
+                className="rounded-lg border border-border px-4 py-2 text-xs font-medium text-muted-foreground hover:bg-accent"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const state = reviewDiffFile;
+                  setReviewDiffFile(null);
+                  handleRequestLocalUpdate(state.file, state.sharedNode);
+                }}
+                className="rounded-lg bg-primary px-4 py-2 text-xs font-bold text-primary-foreground hover:opacity-90 shadow-md"
+              >
+                Update Local File
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
