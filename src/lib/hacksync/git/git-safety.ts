@@ -5,6 +5,7 @@
  */
 
 import { resolve, normalize, isAbsolute } from "node:path";
+import { realpathSync, existsSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { AuthorizationError } from "@/lib/errors";
@@ -50,8 +51,37 @@ export class GitSafety {
     "clone",
   ]);
 
+  // Approved options and flags starting with '-'
+  private static readonly ALLOWED_FLAG_PATTERNS: RegExp[] = [
+    /^--porcelain(?:=v[12])?$/,
+    /^-u(?:normal|all|no)?$/,
+    /^-s$/,
+    /^--short$/,
+    /^-b$/,
+    /^--branch$/,
+    /^--unified=\d+$/,
+    /^-U\d*$/,
+    /^-u$/,
+    /^-p$/,
+    /^--cached$/,
+    /^--staged$/,
+    /^--stat$/,
+    /^--name-only$/,
+    /^--name-status$/,
+    /^--oneline$/,
+    /^-n\d*$/,
+    /^--max-count=\d+$/,
+    /^--format=[a-zA-Z0-9_%|\-:\x1f]+$/,
+    /^--show-current$/,
+    /^--verify$/,
+    /^--$/,
+  ];
+
+  private static readonly SAFE_REVISION_OR_ARG_REGEX = /^[a-zA-Z0-9_./~^@:+-]+$/;
+
   /**
    * Resolves and validates that a repository path is confined to the authorized project directory.
+   * Enforces symlink resolution using realpath to prevent filesystem breakout.
    */
   static validateProjectRepoPath(authorizedProjectRoot: string, requestedPath?: string): string {
     if (!authorizedProjectRoot || authorizedProjectRoot.trim() === "") {
@@ -59,15 +89,42 @@ export class GitSafety {
     }
 
     const canonicalRoot = normalize(resolve(authorizedProjectRoot));
+    let realRoot = canonicalRoot;
+    if (existsSync(canonicalRoot)) {
+      try {
+        realRoot = normalize(realpathSync(canonicalRoot));
+      } catch {
+        realRoot = canonicalRoot;
+      }
+    }
 
-    // If requested path is supplied, it must resolve within canonicalRoot
+    // If requested path is supplied, it must resolve within canonicalRoot and realRoot
     if (requestedPath && requestedPath.trim() !== "") {
       const canonicalRequested = normalize(resolve(requestedPath));
-      if (!canonicalRequested.startsWith(canonicalRoot)) {
+      
+      // 1. Textual path prefix check
+      if (!canonicalRequested.toLowerCase().startsWith(canonicalRoot.toLowerCase())) {
         throw new AuthorizationError(
           `[GitSafety] Path traversal / cross-project escape prevented. Target '${requestedPath}' is outside authorized root '${authorizedProjectRoot}'.`,
         );
       }
+
+      // 2. Realpath symlink resolution check
+      let realRequested = canonicalRequested;
+      if (existsSync(canonicalRequested)) {
+        try {
+          realRequested = normalize(realpathSync(canonicalRequested));
+        } catch {
+          realRequested = canonicalRequested;
+        }
+      }
+
+      if (!realRequested.toLowerCase().startsWith(realRoot.toLowerCase())) {
+        throw new AuthorizationError(
+          `[GitSafety] Symlink traversal escape prevented. Real target '${realRequested}' resolves outside authorized root '${realRoot}'.`,
+        );
+      }
+
       return canonicalRequested;
     }
 
@@ -76,6 +133,7 @@ export class GitSafety {
 
   /**
    * Validates structured Git CLI arguments against the strict read-only allowlist.
+   * Every single argument is independently validated; unexpected flags or revisions starting with '-' are rejected.
    */
   static validateGitArgs(args: string[]): string[] {
     if (!args || args.length === 0) {
@@ -101,8 +159,11 @@ export class GitSafety {
       );
     }
 
-    // 3. Inspect flags and parameters for shell injections or escapes
-    for (const arg of args) {
+    // 3. Inspect every parameter independently
+    let pastDashDash = false;
+    for (let i = 1; i < args.length; i++) {
+      const arg = args[i]!;
+
       // Reject dangerous shell metacharacters
       if (/[;&|`$<>]/.test(arg)) {
         throw new AuthorizationError(
@@ -110,11 +171,45 @@ export class GitSafety {
         );
       }
 
-      // Reject path traversal tokens in file filters
+      // Reject path traversal tokens in file filters or revisions
       if (arg.includes("../") || arg.includes("..\\")) {
         throw new AuthorizationError(
           `[GitSafety] Path traversal sequence detected in Git argument '${arg}'.`,
         );
+      }
+
+      if (arg === "--") {
+        pastDashDash = true;
+        continue;
+      }
+
+      if (pastDashDash) {
+        // Path argument after '--'
+        if (arg.startsWith("-")) {
+          throw new AuthorizationError(
+            `[GitSafety] Path argument cannot begin with '-': '${arg}'.`,
+          );
+        }
+        continue;
+      }
+
+      // Arguments before '--'
+      if (arg.startsWith("-")) {
+        // Option/flag argument: must strictly match approved flag patterns
+        const isAllowedFlag = this.ALLOWED_FLAG_PATTERNS.some((pattern) => pattern.test(arg));
+        if (!isAllowedFlag) {
+          throw new AuthorizationError(
+            `[GitSafety] Disallowed Git option '${arg}'. All options must be strictly allowlisted.`,
+          );
+        }
+      } else {
+        // Non-option argument: revision, commit, branch, or tag
+        // Ensure safe revision syntax (cannot begin with -)
+        if (!this.SAFE_REVISION_OR_ARG_REGEX.test(arg)) {
+          throw new AuthorizationError(
+            `[GitSafety] Malicious or invalid Git revision/argument: '${arg}'.`,
+          );
+        }
       }
     }
 

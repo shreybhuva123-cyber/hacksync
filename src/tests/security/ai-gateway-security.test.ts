@@ -104,7 +104,7 @@ describe("HackSync Phase 0: AI Gateway & Security Controls", () => {
     registerTestMembership("proj-beta", "usr-lead-b", "lead");
     registerTestMembership("proj-beta", "usr-dev-b", "member");
     registerTestMembership("proj-corr", "usr-corr-lead", "lead");
-    registerTestMembership("proj-rate-test", "usr-rate-limit-test", "lead");
+    registerTestMembership("proj-rate-test", "usr-rate-user", "lead");
   });
 
   // ───────────────────────────────────────────────────────────────────────────

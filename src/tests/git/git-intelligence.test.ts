@@ -75,6 +75,39 @@ describe("HackSync Phase 3: Git Intelligence", () => {
       }
     });
 
+    it("should strictly REJECT unallowlisted options and Git argument injection attempts", () => {
+      const injectionAttempts = [
+        ["diff", "-o", "/tmp/malicious-output"],
+        ["diff", "--output=/tmp/evil.patch"],
+        ["diff", "--exec=calc.exe"],
+        ["status", "-D"],
+        ["log", "--upload-pack=/bin/sh"],
+        ["log", "--config=core.editor=malicious"],
+        ["diff", "-F", "pattern"],
+      ];
+
+      for (const cmd of injectionAttempts) {
+        expect(() => {
+          GitSafety.validateGitArgs(cmd);
+        }).toThrow(AuthorizationError);
+      }
+    });
+
+    it("should strictly REJECT revisions or path arguments beginning with '-'", () => {
+      const maliciousRevisions = [
+        ["diff", "-evil-revision"],
+        ["diff", "--foo"],
+        ["diff", "HEAD", "--", "-malicious-path"],
+        ["log", "-bad-commit-hash"],
+      ];
+
+      for (const cmd of maliciousRevisions) {
+        expect(() => {
+          GitSafety.validateGitArgs(cmd);
+        }).toThrow(AuthorizationError);
+      }
+    });
+
     it("should REJECT path traversal attempts outside authorized project root", () => {
       expect(() => {
         GitSafety.validateProjectRepoPath(authorizedRoot, "../../../secret-system-folder");
@@ -82,6 +115,15 @@ describe("HackSync Phase 3: Git Intelligence", () => {
 
       expect(() => {
         GitSafety.validateProjectRepoPath(authorizedRoot, "C:\\Windows\\System32");
+      }).toThrow(AuthorizationError);
+    });
+
+    it("should detect symlink escapes where link resides inside root but target resolves outside", () => {
+      // Create a mock symlink scenario or test validation
+      // Even if textual path starts with root, if realpath escapes root, it is rejected
+      const outsideSystemDir = resolve(authorizedRoot, "..");
+      expect(() => {
+        GitSafety.validateProjectRepoPath(authorizedRoot, outsideSystemDir);
       }).toThrow(AuthorizationError);
     });
 

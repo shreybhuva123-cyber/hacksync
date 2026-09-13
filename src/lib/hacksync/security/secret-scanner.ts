@@ -49,7 +49,7 @@ export class SecretScanner {
     const lLower = lineText.toLowerCase();
     const fLower = filePath.toLowerCase();
 
-    // 1. Documentation or mock/test paths
+    // 1. Documentation, mock/test paths, and example/sample configs
     if (
       fLower.endsWith(".md") ||
       fLower.endsWith(".txt") ||
@@ -57,9 +57,13 @@ export class SecretScanner {
       fLower.includes(".spec.") ||
       fLower.includes("/fixtures/") ||
       fLower.includes("/mock/") ||
-      fLower.includes("/mocks/")
+      fLower.includes("/mocks/") ||
+      fLower.endsWith(".example") ||
+      fLower.endsWith(".sample") ||
+      fLower.includes(".env.example") ||
+      fLower.includes(".env.sample")
     ) {
-      // In test or doc files, if it contains explicit mock markers, ignore
+      // In test or doc/example files, if it contains explicit mock markers, ignore
       if (
         vLower.includes("mock") ||
         vLower.includes("fake") ||
@@ -67,6 +71,12 @@ export class SecretScanner {
         vLower.includes("placeholder") ||
         vLower.includes("example") ||
         vLower.includes("sample") ||
+        vLower.includes("your-") ||
+        vLower.includes("your_") ||
+        vLower.includes("insert_") ||
+        vLower.includes("changeme") ||
+        vLower.includes("replace_") ||
+        vLower.includes("localhost") ||
         /^0+$/.test(value) ||
         /^x+$/i.test(value) ||
         vLower.includes("test")
@@ -163,13 +173,21 @@ export class SecretScanner {
         }
       }
 
-      // 2. Shannon Entropy & Contextual String Detection (for unrecognized high-entropy strings)
-      // Extracts string literals e.g. "Abc123xyz...", '...'
-      const stringMatches = trimmed.matchAll(/["']([a-zA-Z0-9_\-+/]{20,})["']/g);
-      for (const match of stringMatches) {
-        const candidate = match[1];
-        if (!candidate) continue;
+      // 2. Shannon Entropy & Contextual String Detection
+      // Extracts string literals: "abc123xyz...", '...'
+      const candidates: string[] = [];
+      const stringMatches = trimmed.matchAll(/["']([a-zA-Z0-9_\-+/]{16,})["']/g);
+      for (const m of stringMatches) {
+        if (m[1]) candidates.push(m[1]);
+      }
 
+      // Also extract unquoted environment file / config assignments: KEY=value
+      const envAssignMatch = trimmed.match(/^[A-Z0-9_]*(?:SECRET|KEY|PASSWORD|PASSWD|TOKEN|AUTH|CREDENTIAL|PRIVATE)[A-Z0-9_]*\s*=\s*(["']?)([a-zA-Z0-9_\-+/]{16,})\1/i);
+      if (envAssignMatch && envAssignMatch[2]) {
+        candidates.push(envAssignMatch[2]);
+      }
+
+      for (const candidate of candidates) {
         if (this.isSafePlaceholder(candidate, trimmed, filePath)) {
           continue;
         }
@@ -177,9 +195,10 @@ export class SecretScanner {
         const entropy = this.computeShannonEntropy(candidate);
         // Shannon entropy threshold: > 4.2 bits per char indicates random/cryptographic string
         if (entropy > 4.2) {
-          // Check if variable context suggests a secret e.g. token, key, secret, auth
+          // Check if variable context or file name suggests a secret
           const isSecretContext =
-            /token|key|secret|credential|password|passwd|auth|private|signature/i.test(trimmed);
+            /token|key|secret|credential|password|passwd|auth|private|signature/i.test(trimmed) ||
+            /(?:^|[/\\])\.env(?:\.[a-zA-Z0-9_\-]+)?$/i.test(filePath);
 
           if (isSecretContext) {
             const { redactedText: maskedLine } = SecretRedactor.redact(trimmed);

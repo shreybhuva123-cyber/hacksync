@@ -47,8 +47,8 @@ The following commands are strictly blocked. Any invocation triggers an `Authori
 
 ## 3. Sandboxing & Confinement Rules
 
-### A. Repository Path Canonicalization
-Before any Git process is executed, target repository paths undergo strict normalization:
+### A. Repository Path Canonicalization & Symlink Escape Protection
+Before any Git process is executed, target repository paths undergo strict lexical and physical filesystem validation:
 ```typescript
 const canonicalRoot = path.normalize(path.resolve(authorizedProjectRoot));
 const canonicalTarget = path.normalize(path.resolve(requestedPath));
@@ -56,14 +56,26 @@ const canonicalTarget = path.normalize(path.resolve(requestedPath));
 if (!canonicalTarget.startsWith(canonicalRoot)) {
   throw new AuthorizationError("Cross-project directory escape prevented.");
 }
+
+// Physical symlink resolution prevents symlinks within the project root from escaping to external directories
+const realRoot = fs.realpathSync(canonicalRoot);
+const realTarget = fs.realpathSync(canonicalTarget);
+if (!realTarget.startsWith(realRoot)) {
+  throw new AuthorizationError("Symlink escape outside project root detected.");
+}
 ```
 
-### B. Shell-Free Process Spawning
+### B. Shell-Free Process Spawning & Per-Argument Allowlisting
 Git CLI execution uses `node:child_process.execFile`:
 - Arguments are passed as an array of discrete strings (`string[]`).
 - The OS shell (`/bin/sh`, `bash`, `cmd.exe`) is bypassed completely.
-- Shell metacharacters (`;`, `&`, `|`, `` ` ``, `$`, `>`, `<`) cannot trigger command chaining or argument injection.
+- **Independent Argument Allowlisting**: Even with `execFile`, every individual argument beginning with `-` is independently validated against `ALLOWED_FLAG_PATTERNS` (e.g. `--porcelain=v1`, `--unified=3`, `-u`, `--cached`, `--oneline`, `-n\d+`, `--show-current`, `--`). Any unallowlisted option (e.g. `-o`, `--output`, `--exec`, `--upload-pack`, `-D`) is immediately rejected with an `AuthorizationError`.
 
-### C. Resource Bounding & Timeouts
+### C. Revision & Path Safety
+- Non-flag arguments (revisions, commit SHAs, file paths) are strictly forbidden from starting with `-` to ensure they cannot be interpreted by Git as options or flags.
+- Revisions are validated against `SAFE_REVISION_OR_ARG_REGEX` (`^[a-zA-Z0-9_./~^@:+-]+$`).
+- Path separation syntax (`--`) is preferred and enforced where revisions and filepaths are passed.
+
+### D. Resource Bounding & Timeouts
 - All Git operations have a hard 10-second timeout.
 - Maximum stdout buffer is capped at 10 MB to prevent memory exhaustion from massive diffs.

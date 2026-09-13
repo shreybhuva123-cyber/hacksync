@@ -53,15 +53,21 @@ The `SourceSinkAnalyzer` performs lightweight, deterministic data flow tracing a
 - **Taint Propagation**: Tracks intermediate variables assigned from untrusted sources.
 - **Defensive Patterns**: Acknowledges defensive sanitization (`parseInt`, `Number`, `DOMPurify.sanitize`, parameterized queries `$1, $2`) to prevent false positives.
 
+> [!NOTE]
+> **Intra-File Scope & Confidence Honesty**: `SourceSinkAnalyzer` is a lightweight, deterministic heuristic dataflow scanner scoped to intra-file AST and syntax tracing. It is intentionally NOT a sound, whole-program interprocedural taint compiler. Flows that cross complex asynchronous boundaries or span large line distances (> 25 lines) have their confidence calibrated honestly (downgraded to `medium`) to reflect heuristic limits rather than claiming definitive exploitability.
+
 ---
 
 ### 3. Dedicated Secret Scanner & Shannon Entropy
 
 The `SecretScanner` identifies embedded credentials using a dual-detection engine:
-1. **Known Signature Regexes**: GitHub PATs, AWS Access Keys, Stripe API keys, Slack Webhooks, RSA Private Keys, Generic Bearer Tokens.
-2. **Shannon Entropy Calculator**: Calculates information entropy ($H(X) = -\sum P(x) \log_2 P(x)$) over 20+ character hex and base64 strings. Strings with $H > 4.2$ are flagged.
-3. **Guaranteed Secret Redaction**: The `SecretRedactor` masks all credentials in findings, evidence snippets, and tool outputs (`sk_live_...` $\to$ `sk_live_***REDACTED***`) so plaintext secrets are never written to disk, database, or LLM context.
-4. **Contextual Exclusions**: Excludes tests, mock fixtures, placeholder strings (`"TODO"`, `"fake_key_0000"`), and environment variable reads (`process.env.KEY`).
+1. **Known Signature Regexes**: GitHub PATs, AWS Access Keys, Stripe API keys, Supabase Secrets, Slack Webhooks, RSA/SSH Private Keys, Generic Bearer Tokens, and `.env` Credential Assignments.
+2. **Shannon Entropy Calculator**: Calculates information entropy ($H(X) = -\sum P(x) \log_2 P(x)$) over 16+ character hex and base64 strings. Strings with $H > 4.2$ in secret-associated contexts or configuration files are flagged.
+3. **Guaranteed Secret Redaction**: The `SecretRedactor` masks all credentials in findings, evidence snippets, and tool outputs (`sk_live_...` $\to$ `[REDACTED_STRIPE_KEY]`, `postgres://...` $\to$ `postgresql://...:[REDACTED_DB_PASSWORD]@...`) so plaintext secrets are never written to disk, database, or LLM context.
+4. **Environment File Scanning vs. Runtime References**:
+   - **`.env` files** (`.env`, `.env.local`, `.env.production`) are explicitly scanned for embedded live credentials, and all extracted evidence is aggressively redacted (`[REDACTED_ENV_SECRET]`).
+   - **Template/Example files** (`.env.example`, `.env.sample`) containing placeholder tokens (`your_api_key_here`, `changeme`, `placeholder`) are recognized as safe templates and excluded from alerting.
+   - **Application Code References** such as `process.env.API_KEY` are safe configuration reads and are not flagged as hardcoded secrets.
 
 ---
 

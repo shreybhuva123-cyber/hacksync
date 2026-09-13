@@ -6,8 +6,9 @@
 2. **Decoupled Severity vs. Confidence**:
    - `severity`: Impact if exploited (`critical`, `high`, `medium`, `low`, `informational`).
    - `confidence`: Certainty of detection based on dataflow trace and pattern strength (`very_high`, `high`, `medium`, `low`).
-3. **Guaranteed Secret Redaction**: Secrets must never be displayed in plaintext.
+3. **Guaranteed Secret Redaction**: Secrets must never be displayed in plaintext in evidence, findings, or LLM contexts. Live `.env` files are scanned for secrets with aggressive masking (`[REDACTED_ENV_SECRET]`), while benign code references (`process.env.VAR`) and templates (`.env.example`) are preserved without false alerts.
 4. **Passive Audit Only**: All security tooling operates passively without generating external network traffic or payload injections.
+5. **Calibrated Heuristic Dataflow**: Intra-file taint tracing is heuristic, not a sound interprocedural compiler. Long-range (> 25 lines) or multi-step flows are calibrated down to `medium` confidence to reflect analysis limitations honestly.
 
 ---
 

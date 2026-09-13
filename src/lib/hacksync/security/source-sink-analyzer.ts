@@ -1,6 +1,12 @@
 /**
  * Source-Sink Data Flow Analyzer — HackSync Phase 3
- * Lightweight, evidence-first data flow tracer tracking untrusted user input to dangerous sinks.
+ * 
+ * ARCHITECTURAL SCOPE & HONESTY NOTICE:
+ * This analyzer is a lightweight, heuristic, intra-file (single-file) data flow tracer
+ * tracking untrusted inputs to dangerous execution sinks within common handler functions.
+ * It is NOT a full, sound, whole-program interprocedural taint compiler.
+ * Confidence ratings are calibrated honestly: direct local sinks are rated high/very_high,
+ * while multi-step, distance-separated, or complex flows are rated medium to reflect heuristic limits.
  */
 
 import type { FindingConfidence } from "./finding-types";
@@ -142,6 +148,12 @@ export class SourceSinkAnalyzer {
                 (sink.type === "sql_execution" && trimmed.includes("$1") && !trimmed.includes("+") && !trimmed.includes("${"));
 
               if (!isSanitized) {
+                // Calibrate confidence: long-distance or multi-line flows are rated honestly
+                let calculatedConfidence = sink.confidence;
+                if (lineNum - sourceInfo.line > 25) {
+                  calculatedConfidence = calculatedConfidence === "very_high" ? "high" : "medium";
+                }
+
                 traces.push({
                   sourceType: sourceInfo.type,
                   sinkType: sink.type,
@@ -150,7 +162,7 @@ export class SourceSinkAnalyzer {
                   sourceSnippet: sourceInfo.snippet,
                   sinkLine: lineNum,
                   sinkSnippet: trimmed,
-                  confidence: sink.confidence,
+                  confidence: calculatedConfidence,
                   evidence: `Untrusted variable '${varName}' originating from ${sourceInfo.type} at line ${sourceInfo.line} flows into ${sink.type} at line ${lineNum} without defensive parameterization or sanitization.`,
                 });
               }

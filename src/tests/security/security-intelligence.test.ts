@@ -325,6 +325,36 @@ describe("HackSync Phase 3: Security Intelligence", () => {
       expect(findings[0]?.severity).toBe("critical");
       expect(findings[0]?.confidence).toBe("very_high");
     });
+
+    it("should detect and aggressively redact unquoted credentials in .env files", () => {
+      const dynamicKey = ["sec", "live", "99887766554433221100aabbcc"].join("_");
+      const envContent = [
+        "PORT=3000",
+        `API_KEY=${dynamicKey}`,
+        "DATABASE_URL=postgres://app_user:s3cr3t_p@ssw0rd!@db.internal:5432/production_db",
+      ].join("\n");
+
+      const findings = SecretScanner.scanFile(".env", envContent, projectId);
+
+      expect(findings.length).toBeGreaterThanOrEqual(2);
+      expect(findings.some((f) => f.evidence.includes(dynamicKey))).toBe(false);
+      expect(findings.some((f) => f.evidence.includes("s3cr3t_p@ssw0rd!"))).toBe(false);
+      expect(findings.some((f) => f.evidence.includes("[REDACTED_ENV_SECRET]"))).toBe(true);
+      expect(findings.some((f) => f.evidence.includes("[REDACTED_DB_PASSWORD]"))).toBe(true);
+    });
+
+    it("should NOT flag .env.example with placeholder or template values", () => {
+      const exampleEnv = [
+        "PORT=3000",
+        "API_KEY=your_api_key_here",
+        "DATABASE_URL=postgres://user:changeme@localhost:5432/mydb",
+        "JWT_SECRET=placeholder_secret_token_12345",
+      ].join("\n");
+
+      const findings = SecretScanner.scanFile(".env.example", exampleEnv, projectId);
+
+      expect(findings.length).toBe(0);
+    });
   });
 
   // ───────────────────────────────────────────────────────────────────────────

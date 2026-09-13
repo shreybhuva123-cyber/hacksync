@@ -106,6 +106,14 @@ const REDACTION_PATTERNS: {
     regex: /(["']?(?:password|passwd|jwt_secret|jwtSecret|api_key|apiKey|client_secret|clientSecret|auth_token|authToken)["']?\s*[:=]\s*["'])([^"']{6,})(["'])/gi,
     mask: "$1[REDACTED_SECRET]$3",
   },
+  // Environment File / Unquoted Credential Assignment (e.g., JWT_SECRET=..., API_KEY=..., DATABASE_PASSWORD=...)
+  {
+    name: "Environment File Credential",
+    category: "credential",
+    severity: "critical",
+    regex: /(^[A-Z0-9_]*(?:SECRET|KEY|PASSWORD|PASSWD|TOKEN|AUTH|CREDENTIAL|PRIVATE)[A-Z0-9_]*\s*=\s*)(["']?)([^"'\r\n\s]{6,})(\2)/gim,
+    mask: "$1$2[REDACTED_ENV_SECRET]$2",
+  },
 ];
 
 export class SecretRedactor {
