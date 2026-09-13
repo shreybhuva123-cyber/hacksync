@@ -38,8 +38,44 @@ jobs:
       - name: Run Core Service Tests
         run: bun test src/lib/services/__tests__/
 
-      - name: Run HackSync Intelligence & Security Tests
-        run: bun test src/tests/ src/lib/hacksync/
+      - name: Run HackSync AI Intelligence Test
+        run: bun test src/lib/hacksync/ai-intelligence.test.ts
+
+      - name: Run Phase Tests - AI
+        run: bun test src/tests/ai/
+
+      - name: Run Phase Tests - Concurrency
+        run: bun test src/tests/concurrency/
+
+      - name: Run Phase Tests - Evaluation
+        run: bun test src/tests/evaluation/
+
+      - name: Run Phase Tests - Fixing
+        run: bun test src/tests/fixing/
+
+      - name: Run Phase Tests - Git
+        run: bun test src/tests/git/
+
+      - name: Run Phase Tests - Intelligence
+        run: bun test src/tests/intelligence/
+
+      - name: Run Phase Tests - Observability
+        run: bun test src/tests/observability/
+
+      - name: Run Phase Tests - Resilience
+        run: bun test src/tests/resilience/
+
+      - name: Run Phase Tests - Security
+        run: bun test src/tests/security/
+
+      - name: Run Phase Tests - Testing
+        run: bun test src/tests/testing/
+
+      - name: Run Phase Tests - UI
+        run: bun test src/tests/ui/
+
+      - name: Run Phase Tests - Validation
+        run: bun test src/tests/validation/
 
       - name: Dependency Security Audit
         run: bun pm ls --all 2>&1 | head -100
