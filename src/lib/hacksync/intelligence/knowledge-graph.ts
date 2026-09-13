@@ -297,6 +297,10 @@ export class ProjectKnowledgeGraph {
     return this.fileContents.get(path);
   }
 
+  hasFile(path: string): boolean {
+    return this.files.has(path) || this.fileContents.has(path);
+  }
+
   getFileSummary(path: string): ParsedAstSummary | undefined {
     return this.files.get(path);
   }
@@ -387,6 +391,15 @@ export class ProjectKnowledgeGraph {
       (summary.routes || summary.apiRoutes).forEach((r) => routes.push({ filePath, route: r }));
     });
     return routes;
+  }
+
+  getApiRoutes(): { method: string; path: string; filePath: string; authRequired?: boolean | undefined }[] {
+    return this.getAllApiRoutes().map((item) => ({
+      method: item.route.method,
+      path: item.route.path,
+      filePath: item.filePath,
+      authRequired: item.route.authRequired,
+    }));
   }
 
   getArchitectureProfile(): ProjectArchitectureProfile {

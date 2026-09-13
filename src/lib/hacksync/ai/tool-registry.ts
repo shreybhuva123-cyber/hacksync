@@ -1,6 +1,72 @@
 import type { ToolDefinition } from "./types";
 
 export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
+  // ─── Core Phase 2 Read-Only Tools ──────────────────────────────────────────
+  search_symbols: {
+    name: "search_symbols",
+    description: "Look up function, class, component, interface, or route symbol definitions with exact line numbers and signatures.",
+    tier: "READ_ONLY",
+    parameters: {
+      name: { type: "string", description: "Exact or partial symbol name", required: true },
+    },
+  },
+  find_references: {
+    name: "find_references",
+    description: "Find files, callers, and modules that import or depend on a given file or symbol.",
+    tier: "READ_ONLY",
+    parameters: {
+      target: { type: "string", description: "File path or symbol name", required: true },
+    },
+  },
+  get_project_structure: {
+    name: "get_project_structure",
+    description: "Get the complete hierarchical file tree, languages, circular dependencies, and project metrics.",
+    tier: "READ_ONLY",
+    parameters: {},
+  },
+  retrieve_code: {
+    name: "retrieve_code",
+    description: "Read the content of a project file with optional line ranges and automatic secret redaction.",
+    tier: "READ_ONLY",
+    parameters: {
+      path: { type: "string", description: "Relative file path", required: true },
+      startLine: { type: "number", description: "Starting line (1-indexed)" },
+      endLine: { type: "number", description: "Ending line (inclusive)" },
+    },
+  },
+  find_api_routes: {
+    name: "find_api_routes",
+    description: "Locate registered API routes, endpoints, HTTP methods, and authentication requirements from AST parsing and contracts.",
+    tier: "READ_ONLY",
+    parameters: {
+      method: { type: "string", description: "HTTP method filter (GET, POST, etc.)" },
+      routePrefix: { type: "string", description: "URL path prefix filter" },
+    },
+  },
+  find_database_usage: {
+    name: "find_database_usage",
+    description: "Identify database tables, columns, SQL queries, and project files that reference them.",
+    tier: "READ_ONLY",
+    parameters: {
+      tableName: { type: "string", description: "Optional table name filter" },
+    },
+  },
+  architecture_summary: {
+    name: "architecture_summary",
+    description: "Produce a structured architectural layer breakdown (routes, services, database, auth, components, middleware, config, tests).",
+    tier: "READ_ONLY",
+    parameters: {},
+  },
+  dependency_impact: {
+    name: "dependency_impact",
+    description: "Traverse reverse dependency graph to calculate blast radius, affected API routes, and risk score for changes to a target.",
+    tier: "READ_ONLY",
+    parameters: {
+      target: { type: "string", description: "File path or symbol name to assess", required: true },
+    },
+  },
+
+  // ─── Backward-Compatible Aliases & Specialized Analysis Tools ──────────────
   search_project: {
     name: "search_project",
     description: "Search project files and code tokens using BM25 relevance scoring.",
@@ -12,28 +78,12 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
   },
   read_file: {
     name: "read_file",
-    description: "Read the content of a project file with optional line ranges and automatic secret redaction.",
+    description: "Read the content of a project file with optional line ranges and automatic secret redaction (alias for retrieve_code).",
     tier: "READ_ONLY",
     parameters: {
       path: { type: "string", description: "Relative file path", required: true },
       startLine: { type: "number", description: "Starting line (1-indexed)" },
       endLine: { type: "number", description: "Ending line (inclusive)" },
-    },
-  },
-  search_symbols: {
-    name: "search_symbols",
-    description: "Look up function, class, component, or route symbol definitions.",
-    tier: "READ_ONLY",
-    parameters: {
-      name: { type: "string", description: "Exact or partial symbol name", required: true },
-    },
-  },
-  find_references: {
-    name: "find_references",
-    description: "Find files and callers that import or depend on a given file or symbol.",
-    tier: "READ_ONLY",
-    parameters: {
-      target: { type: "string", description: "File path or symbol name", required: true },
     },
   },
   analyze_code: {
@@ -53,12 +103,6 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
   analyze_dependencies: {
     name: "analyze_dependencies",
     description: "Inspect project manifests against standard security advisory catalogs.",
-    tier: "READ_ONLY",
-    parameters: {},
-  },
-  get_project_structure: {
-    name: "get_project_structure",
-    description: "Get the complete file tree and project metrics.",
     tier: "READ_ONLY",
     parameters: {},
   },

@@ -2,6 +2,9 @@
  * Core Type Definitions for HackSync AI Orchestration System
  */
 
+export * from "./tool-types";
+export * from "./execution-budget";
+
 export type AIIntentType =
   | "debug"
   | "security"

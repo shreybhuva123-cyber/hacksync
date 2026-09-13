@@ -12,12 +12,23 @@ import { HybridRetrievalEngine, type RetrievalResult } from "../intelligence/ret
 import { ProjectContextBuilder, type BuiltContext } from "../intelligence/context-builder";
 import type { AIIntentType, AIFinding, ToolCallResult } from "./types";
 import type { LLMMessage } from "./provider-interface";
+import type {
+  TaskType,
+  TaskPlan,
+  AIResult,
+  VerifiedEvidenceItem,
+  OrchestratorRequest,
+} from "./tool-types";
+import { TaskClassifier } from "./task-classifier";
+import { ContextPlanner } from "./context-planner";
+import { ExecutionBudgetManager } from "./execution-budget";
+import { OutputValidator } from "./output-validator";
 
 export interface OrchestrationResult {
   text: string;
   intent: AIIntentType;
   modelUsed: string;
-  toolCalls: { name: string; success: boolean; summary: string }[];
+  toolCalls: { name: string; success: boolean; summary: string; executionMs?: number | undefined }[];
   findings: AIFinding[];
   suggestedActions: { label: string; action: string; payload?: any }[];
   requestId: string;
@@ -32,7 +43,7 @@ export class AIOrchestrator {
   }
 
   /**
-   * Fast intent classifier
+   * Fast intent classifier — maintained for backward compatibility with existing tests and UI.
    */
   static detectIntent(query: string): AIIntentType {
     const q = query.toLowerCase();
@@ -86,91 +97,122 @@ export class AIOrchestrator {
   }
 
   /**
-   * Primary Entry Point: Coordinates Intent, Tools, Evidence, and Response Synthesis
+   * CANONICAL ENTRY POINT — Unified AI Orchestrator Pipeline
+   * Handles:
+   * Request Validation → Task Classification → Context Planning → Secure Tool Execution →
+   * Multi-Signal Retrieval → Model Routing (with Fallbacks) → Citation Validation → Audit/Observability
    */
-  static async processQuery(params: {
-    query: string;
-    ws?: Workspace | null | undefined;
-    activeNode?: CodeNode | null | undefined;
-    memberFiles?: MemberFile[] | undefined;
-    userId?: string | undefined;
-    securityContext?: AISecurityContext | undefined;
-    modelPreference?: string | undefined;
-    chatHistory?: { role: string; content: string }[] | undefined;
-  }): Promise<OrchestrationResult> {
+  static async process(request: OrchestratorRequest): Promise<AIResult> {
     const startTime = Date.now();
-    const requestId = params.securityContext?.requestId || AIObservability.generateRequestId();
+    const requestId = request.securityContext?.requestId || AIObservability.generateRequestId();
 
-    // 1. Resolve security context and enforce tenant boundary
+    // 1. Resolve security context and enforce tenant isolation
     let tenantContext: AISecurityContext;
-    if (params.securityContext) {
-      tenantContext = params.securityContext;
-    } else if (params.ws) {
-      const resolvedUserId = params.userId || params.ws.members?.[0]?.user_id || params.ws.project.created_by;
+    if (request.securityContext) {
+      tenantContext = request.securityContext;
+    } else if (request.ws) {
+      const resolvedUserId = request.userId || request.ws.members?.[0]?.user_id || request.ws.project.created_by;
       if (!resolvedUserId) {
         throw new AuthenticationError("[AIOrchestrator] Authentication required. No securityContext or authenticated userId provided.");
       }
-      tenantContext = TenantGuard.extractContext(params.ws, resolvedUserId, requestId);
+      tenantContext = TenantGuard.extractContext(request.ws, resolvedUserId, requestId);
+    } else if (request.userId && request.projectId) {
+      tenantContext = {
+        userId: request.userId,
+        projectId: request.projectId,
+        role: "member",
+        requestId,
+      };
     } else {
       throw new AuthorizationError("[AIOrchestrator] Project context required: cannot execute AI orchestration without an authorized project.");
     }
 
     const userId = tenantContext.userId;
     const projectId = tenantContext.projectId;
-    const preference = params.modelPreference || "builtin";
+    const preference = request.modelPreference || "builtin";
 
-    // Validate project boundary
-    TenantGuard.validateProjectAccess(tenantContext, projectId, "AI Query Orchestration");
+    // Validate project tenancy boundary
+    if (request.projectId && request.projectId !== tenantContext.projectId) {
+      TenantGuard.validateProjectAccess(tenantContext, request.projectId, "AI Query Orchestration");
+    } else {
+      TenantGuard.validateProjectAccess(tenantContext, projectId, "AI Query Orchestration");
+    }
 
-    // 2. Resolve multi-turn context (e.g. "fix it", "now test it")
+    // 2. Resolve conversational references (e.g. "fix it", "now test it")
     const { resolvedQuery, activeBugId, activeFilePath } =
-      ConversationMemory.resolveContextualReferences(params.query, userId);
+      ConversationMemory.resolveContextualReferences(request.query, userId);
 
-    // 3. Classify intent
-    const intent = this.detectIntent(resolvedQuery);
+    // 3. Classify task and construct TaskPlan
+    const plan = TaskClassifier.plan(resolvedQuery, activeFilePath, request.taskOverride);
+    const legacyIntent = TaskClassifier.toLegacyIntent(plan.taskType, resolvedQuery);
 
     // 4. Ensure Project Knowledge Graph is isolated and indexed for THIS project
     const knowledgeGraph = ProjectIndexManager.getGraph(projectId);
-    if (params.ws) {
-      knowledgeGraph.indexWorkspace(params.ws, params.memberFiles || []);
-    } else if (params.activeNode && params.activeNode.content) {
-      TenantGuard.sanitizeFilePath(params.activeNode.path);
-      knowledgeGraph.indexFile(params.activeNode.path, params.activeNode.content);
+    if (request.ws) {
+      knowledgeGraph.indexWorkspace(request.ws, request.memberFiles || []);
+    } else if (request.activeNode && request.activeNode.content) {
+      TenantGuard.sanitizeFilePath(request.activeNode.path);
+      knowledgeGraph.indexFile(request.activeNode.path, request.activeNode.content);
     }
 
-    const toolExecutor = new AIToolExecutor(knowledgeGraph, tenantContext, requestId);
-    const executedTools: { name: string; success: boolean; summary: string }[] = [];
-    const collectedFindings: AIFinding[] = [];
+    // 5. Context Planning
+    const plannedContext = ContextPlanner.planContext({
+      plan,
+      query: resolvedQuery,
+      graph: knowledgeGraph,
+      ws: request.ws,
+      options: { activeFilePath },
+    });
 
-    // 5. Tool Selection & Execution based on Intent
-    if (intent === "debug") {
-      // Search relevant files
+    // 6. Tool Selection & Execution within Execution Budget
+    const maxBudgetCalls = request.maxBudgetCalls || plan.maxToolCalls || 8;
+    const budgetManager = new ExecutionBudgetManager({ maxToolCalls: maxBudgetCalls });
+    const toolExecutor = new AIToolExecutor(knowledgeGraph, tenantContext, requestId, request.ws, budgetManager);
+
+    const executedTools: { name: string; success: boolean; summary: string; executionMs?: number }[] = [];
+    const collectedFindings: AIFinding[] = [];
+    const verifiedEvidence: VerifiedEvidenceItem[] = [];
+
+    // Execute appropriate tools based on task type / legacy intent
+    if (legacyIntent === "fix") {
+      const targetFindingId = activeBugId || collectedFindings[0]?.id || "FINDING-1";
+      const fixRes = await toolExecutor.execute("generate_fix", { findingId: targetFindingId });
+      executedTools.push({
+        name: "generate_fix",
+        success: fixRes.success,
+        summary: `Generated fix plan for ${targetFindingId}`,
+        executionMs: fixRes.executionMs,
+      });
+    } else if (legacyIntent === "debug" || plan.taskType === "debug") {
+      // 1. Search relevant files
       const searchRes = await toolExecutor.execute("search_project", { query: resolvedQuery, limit: 3 });
       executedTools.push({
         name: "search_project",
         success: searchRes.success,
         summary: `Found ${(searchRes.data || []).length} relevant file(s)`,
+        executionMs: searchRes.executionMs,
       });
 
-      // Analyze code for AST faults
-      const analyzeRes = await toolExecutor.execute("analyze_code", {
-        path: activeFilePath || searchRes.data?.[0]?.path,
-      });
+      // 2. Deep AST code analysis
+      const targetPath = activeFilePath || searchRes.data?.[0]?.path;
+      const analyzeRes = await toolExecutor.execute("analyze_code", { path: targetPath });
       executedTools.push({
         name: "analyze_code",
         success: analyzeRes.success,
         summary: `Identified ${analyzeRes.data?.totalFindings || 0} AST code issue(s)`,
+        executionMs: analyzeRes.executionMs,
       });
 
       if (analyzeRes.data?.findings) {
         collectedFindings.push(...analyzeRes.data.findings);
       }
-    } else if (intent === "security") {
+    } else if (legacyIntent === "security" || plan.taskType === "security" || plan.taskType === "dependency") {
       const secRes = await toolExecutor.execute("analyze_security", {});
       executedTools.push({
         name: "analyze_security",
         success: secRes.success,
         summary: `Passive audit uncovered ${secRes.data?.totalFindings || 0} vulnerability flag(s)`,
+        executionMs: secRes.executionMs,
       });
 
       const depRes = await toolExecutor.execute("analyze_dependencies", {});
@@ -178,20 +220,22 @@ export class AIOrchestrator {
         name: "analyze_dependencies",
         success: depRes.success,
         summary: `Scanned ${depRes.data?.totalDependencies || 0} packages for advisories`,
+        executionMs: depRes.executionMs,
       });
 
       if (secRes.data?.findings) {
         collectedFindings.push(...secRes.data.findings);
       }
-    } else if (intent === "fix") {
-      const targetFindingId = activeBugId || collectedFindings[0]?.id || "FINDING-1";
-      const fixRes = await toolExecutor.execute("generate_fix", { findingId: targetFindingId });
+    } else if (plan.taskType === "impact") {
+      const target = activeFilePath || resolvedQuery.split(" ")[0] || "src/api/login.ts";
+      const impactRes = await toolExecutor.execute("dependency_impact", { target });
       executedTools.push({
-        name: "generate_fix",
-        success: fixRes.success,
-        summary: `Generated fix plan for ${targetFindingId}`,
+        name: "dependency_impact",
+        success: impactRes.success,
+        summary: `Calculated blast radius score ${impactRes.data?.blastRadiusScore || 0} (${impactRes.data?.riskTier || "LOW"})`,
+        executionMs: impactRes.executionMs,
       });
-    } else if (intent === "architecture") {
+    } else if (legacyIntent === "architecture" || plan.taskType === "architecture" || plan.taskType === "explain" || plan.taskType === "project_overview") {
       if (resolvedQuery.toLowerCase().includes("responsible for") || resolvedQuery.toLowerCase().includes("attendance")) {
         const concept = resolvedQuery.replace(/.*responsible for\s+/i, "").replace(/[?.!]+$/, "").trim();
         const files = knowledgeGraph.getFilesResponsibleFor(concept || "auth");
@@ -206,21 +250,27 @@ export class AIOrchestrator {
           name: "get_project_structure",
           success: structRes.success,
           summary: `Indexed ${structRes.data?.metrics?.indexedFilesCount || 0} files`,
+          executionMs: structRes.executionMs,
+        });
+
+        // Run architecture summary
+        const archRes = await toolExecutor.execute("architecture_summary", {});
+        executedTools.push({
+          name: "architecture_summary",
+          success: archRes.success,
+          summary: `Identified ${Object.keys(archRes.data?.layers || {}).length} architectural layers`,
+          executionMs: archRes.executionMs,
         });
       }
+    } else if (plan.taskType === "test" || legacyIntent === "testing") {
+      const searchRes = await toolExecutor.execute("search_project", { query: resolvedQuery, limit: 3 });
+      executedTools.push({
+        name: "search_project",
+        success: searchRes.success,
+        summary: `Found ${(searchRes.data || []).length} relevant test/code file(s)`,
+        executionMs: searchRes.executionMs,
+      });
     }
-
-    // 6. Record Audit Trail
-    AuditTrail.record({
-      requestId,
-      userId,
-      projectId,
-      toolName: executedTools.map((t) => t.name).join(", ") || "none",
-      actionType: "READ_ONLY",
-      status: "success",
-      details: `Intent: ${intent}. Findings: ${collectedFindings.length}`,
-      executionMs: Date.now() - startTime,
-    });
 
     // 7. Update Conversation Memory with primary findings
     if (collectedFindings.length > 0 && collectedFindings[0]) {
@@ -229,7 +279,7 @@ export class AIOrchestrator {
       ConversationMemory.setLastFixPlan(top.recommendedFix, undefined, userId);
     }
 
-    // 8. Hybrid Multi-Signal Retrieval & Project Context Building
+    // 8. Hybrid Multi-Signal Retrieval & Evidence Gathering
     const retrieval = HybridRetrievalEngine.retrieve({
       query: resolvedQuery,
       graph: knowledgeGraph,
@@ -237,15 +287,41 @@ export class AIOrchestrator {
       limit: 5,
     });
 
+    for (const hit of retrieval.hits) {
+      verifiedEvidence.push({
+        file: hit.filePath,
+        lineStart: hit.lineRange?.start || 1,
+        lineEnd: hit.lineRange?.end || 30,
+        snippet: hit.snippet || "",
+        confidence: hit.score,
+        relevanceReason: hit.matchReasons.join(", "),
+      });
+    }
+
+    // Also include evidence from findings
+    for (const f of collectedFindings) {
+      for (const ev of f.evidenceItems) {
+        verifiedEvidence.push({
+          file: ev.filePath,
+          lineStart: ev.line,
+          lineEnd: ev.line + 5,
+          snippet: ev.snippet,
+          confidence: ev.confidence,
+          relevanceReason: ev.reason,
+        });
+      }
+    }
+
     const archProfile = knowledgeGraph.getArchitectureProfile();
     const builtContext = ProjectContextBuilder.build(retrieval, collectedFindings, archProfile, {
       includeArchitectureProfile: true,
     });
 
-    // 9. Model Routing & Synthesis
-    const { provider, modelName } = ModelRouter.getBestProvider(preference, intent);
+    // 9. Model Routing with Multi-Provider Fallback
+    const { provider, modelName, fallbackChain } = ModelRouter.getBestProvider(preference, legacyIntent);
 
     let outputText = "";
+    let usedModel = modelName;
 
     if (provider && provider.isAvailable()) {
       const systemPrompt = `You are HackSync AI, an elite Staff Software Engineer and Cyber Security Specialist.
@@ -255,55 +331,80 @@ Provide clear headings, code snippets with before/after blocks, and actionable s
 
       const messages: LLMMessage[] = [
         { role: "system", content: systemPrompt },
-        ...(params.chatHistory || []).slice(-4).map((h) => ({
+        ...(request.chatHistory || []).slice(-4).map((h) => ({
           role: h.role === "assistant" ? ("assistant" as const) : ("user" as const),
           content: h.content,
         })),
         {
           role: "user",
-          content: `${resolvedQuery}\n\n${builtContext.formattedContext}`,
+          content: `${resolvedQuery}\n\n${plannedContext.formattedContext || builtContext.formattedContext}`,
         },
       ];
 
-      try {
-        const response = await provider.chat(messages);
-        outputText = response.text;
-      } catch {
+      const executionResult = await ModelRouter.executeWithFallback(provider, fallbackChain, messages);
+      if (executionResult.response) {
+        outputText = executionResult.response.text;
+        usedModel = executionResult.usedModel;
+      } else {
+        // All upstream providers failed -> Fallback to Deterministic Report
         outputText = this.formatDeterministicReport(
           resolvedQuery,
-          intent,
+          legacyIntent,
           collectedFindings,
           executedTools,
-          params.ws,
+          request.ws,
           retrieval,
           builtContext,
         );
+        usedModel = "HackSync Built-in Intelligence (deterministic)";
       }
     } else {
-      // Deterministic Static Analysis Output (Honest, 0 Hallucinations)
+      // Deterministic Static Analysis Output (Zero Hallucinations, 100% Honest)
       outputText = this.formatDeterministicReport(
         resolvedQuery,
-        intent,
+        legacyIntent,
         collectedFindings,
         executedTools,
-        params.ws,
+        request.ws,
         retrieval,
         builtContext,
       );
+      usedModel = "HackSync Built-in Intelligence (deterministic)";
     }
 
-    // 9. Record Observability Metrics
+    // 10. Output Validation & Citation Checking
+    const validation = OutputValidator.validate({
+      text: outputText,
+      taskType: plan.taskType,
+      graph: knowledgeGraph,
+      evidence: verifiedEvidence,
+      findings: collectedFindings,
+      baseConfidence: plan.confidence,
+    });
+
+    // 11. Record Audit Trail & Observability Metrics
     const latencyMs = Date.now() - startTime;
     const promptTokens = AIObservability.estimateTokens(resolvedQuery);
-    const completionTokens = AIObservability.estimateTokens(outputText);
+    const completionTokens = AIObservability.estimateTokens(validation.verifiedAnswer);
     const totalTokens = promptTokens + completionTokens;
-    const costUsd = AIObservability.calculateCost(modelName, promptTokens, completionTokens);
+    const costUsd = AIObservability.calculateCost(usedModel, promptTokens, completionTokens);
+
+    AuditTrail.record({
+      requestId,
+      userId,
+      projectId,
+      toolName: executedTools.map((t) => t.name).join(", ") || "none",
+      actionType: "READ_ONLY",
+      status: "success",
+      details: `Task: ${plan.taskType} (Intent: ${legacyIntent}). Findings: ${collectedFindings.length}`,
+      executionMs: latencyMs,
+    });
 
     AIObservability.recordMetrics({
       requestId,
       userId,
       projectId,
-      model: modelName,
+      model: usedModel,
       latencyMs,
       promptTokens,
       completionTokens,
@@ -313,7 +414,7 @@ Provide clear headings, code snippets with before/after blocks, and actionable s
       status: "success",
     });
 
-    // 10. Suggested Next Actions
+    // 12. Suggested Next Actions
     const suggestedActions = [
       { label: "🛠️ Generate Fix Plan", action: "fix_plan", payload: { bugId: collectedFindings[0]?.id } },
       { label: "📋 Generate Agent Prompt", action: "agent_prompt", payload: { bugId: collectedFindings[0]?.id } },
@@ -322,13 +423,65 @@ Provide clear headings, code snippets with before/after blocks, and actionable s
     ];
 
     return {
-      text: outputText,
-      intent,
-      modelUsed: modelName,
-      toolCalls: executedTools,
-      findings: collectedFindings,
-      suggestedActions,
       requestId,
+      taskType: plan.taskType,
+      answer: validation.verifiedAnswer,
+      evidence: verifiedEvidence,
+      findings: collectedFindings,
+      uncertainty: validation.uncertainty && validation.uncertainty.length > 0 ? validation.uncertainty : undefined,
+      confidence: validation.confidence,
+      actionsRequired: suggestedActions,
+      modelUsed: usedModel,
+      toolCalls: executedTools,
+      metrics: {
+        latencyMs,
+        promptTokens,
+        completionTokens,
+        totalTokens,
+        estimatedCostUsd: costUsd,
+      },
+    };
+  }
+
+  /**
+   * Primary Entry Point (Backward Compatible with Phase 0/0.1/1 and UI)
+   */
+  static async processQuery(params: {
+    query: string;
+    ws?: Workspace | null | undefined;
+    activeNode?: CodeNode | null | undefined;
+    memberFiles?: MemberFile[] | undefined;
+    userId?: string | undefined;
+    securityContext?: AISecurityContext | undefined;
+    modelPreference?: string | undefined;
+    chatHistory?: { role: string; content: string }[] | undefined;
+  }): Promise<OrchestrationResult> {
+    const result = await this.process({
+      query: params.query,
+      ws: params.ws,
+      activeNode: params.activeNode,
+      memberFiles: params.memberFiles,
+      userId: params.userId,
+      securityContext: params.securityContext,
+      modelPreference: params.modelPreference,
+      chatHistory: params.chatHistory,
+    });
+
+    const legacyIntent = TaskClassifier.toLegacyIntent(result.taskType, params.query);
+
+    return {
+      text: result.answer,
+      intent: legacyIntent,
+      modelUsed: result.modelUsed,
+      toolCalls: result.toolCalls.map((t) => ({
+        name: t.name,
+        success: t.success,
+        summary: t.summary,
+        executionMs: t.executionMs,
+      })),
+      findings: result.findings || [],
+      suggestedActions: result.actionsRequired || [],
+      requestId: result.requestId,
     };
   }
 

@@ -7,22 +7,41 @@ import { ApprovalGate } from "./approval-gate";
 import { AuditTrail } from "../security/audit-trail";
 import type { ToolCallResult, AIFinding } from "./types";
 import { AuthorizationError } from "@/lib/errors";
+import { ExecutionBudgetManager } from "./execution-budget";
+import type { Workspace } from "../types";
+
+// Import dedicated Phase 2 tools
+import { SearchSymbolsTool } from "./tools/search-symbols";
+import { FindReferencesTool } from "./tools/find-references";
+import { GetProjectStructureTool } from "./tools/get-project-structure";
+import { RetrieveCodeTool } from "./tools/retrieve-code";
+import { FindApiRoutesTool } from "./tools/find-api-routes";
+import { FindDatabaseUsageTool } from "./tools/find-database-usage";
+import { ArchitectureSummaryTool } from "./tools/architecture-summary";
+import { DependencyImpactTool } from "./tools/dependency-impact";
 
 // ─── TOOL PERMISSION TIERS ───────────────────────────────────────────────────
 
 export type ToolPermissionTier = "READ" | "WRITE" | "EXECUTE";
 
 export const TOOL_PERMISSIONS: Record<string, ToolPermissionTier> = {
-  // READ tools (allowed for authorized project members)
+  // Core Phase 2 READ tools
+  search_symbols: "READ",
+  find_references: "READ",
+  get_project_structure: "READ",
+  retrieve_code: "READ",
+  find_api_routes: "READ",
+  find_database_usage: "READ",
+  architecture_summary: "READ",
+  dependency_impact: "READ",
+
+  // Backward-compatible READ tools
   search_project: "READ",
   read_file: "READ",
   get_file: "READ",
-  search_symbols: "READ",
-  find_references: "READ",
   analyze_code: "READ",
   analyze_security: "READ",
   analyze_dependencies: "READ",
-  get_project_structure: "READ",
   git_status: "READ",
   git_diff: "READ",
   generate_fix_prompt: "READ",
@@ -34,7 +53,7 @@ export const TOOL_PERMISSIONS: Record<string, ToolPermissionTier> = {
   delete_file: "WRITE",
   generate_fix: "WRITE",
 
-  // EXECUTE tools (require approval + sandbox; safely disabled on host in Phase 0)
+  // EXECUTE tools (require approval + sandbox; safely disabled on host)
   execute_command: "EXECUTE",
   run_tests: "EXECUTE",
   run_migration: "EXECUTE",
@@ -84,79 +103,116 @@ export function authorizeToolExecution(params: {
 }
 
 export class AIToolExecutor {
+  private budget: ExecutionBudgetManager;
+
   constructor(
     private graph: ProjectKnowledgeGraph,
     private context: AISecurityContext,
     private requestId: string,
-  ) {}
+    private ws?: Workspace | null | undefined,
+    budget?: ExecutionBudgetManager,
+  ) {
+    this.budget = budget || new ExecutionBudgetManager();
+  }
 
-  async execute(toolName: string, rawArgs: Record<string, any>): Promise<ToolCallResult> {
+  getBudgetManager(): ExecutionBudgetManager {
+    return this.budget;
+  }
+
+  async execute(toolName: string, rawArgs: Record<string, any> = {}): Promise<ToolCallResult> {
     const startTime = Date.now();
 
+    // 1. Enforce Execution Budget & Deduplication Guard
+    const budgetCheck = this.budget.checkCanExecute(toolName, rawArgs);
+    if (!budgetCheck.allowed) {
+      return {
+        toolName,
+        success: false,
+        data: null,
+        error: budgetCheck.reason,
+        executionMs: Date.now() - startTime,
+      };
+    }
+
     try {
-      // 1. Centralized Authorization Boundary
+      // 2. Centralized Authorization Boundary
       const { tier, sanitizedArgs: args } = authorizeToolExecution({
         securityContext: this.context,
         toolName,
         arguments: rawArgs,
       });
 
+      // Record call in budget manager
+      this.budget.recordCall(toolName, args);
+
       let data: any = null;
       let requiresApproval = tier === "WRITE" || tier === "EXECUTE";
       let approvalId: string | undefined;
 
       switch (toolName) {
-        case "search_project": {
-          const query = String(args["query"] || "");
-          const limit = Math.min(20, Math.max(1, Number(args["limit"] || 5)));
-          data = this.graph.search(query, limit);
-          break;
-        }
-
-        case "get_file":
-        case "read_file": {
-          const safePath = String(args["path"] || args["filePath"] || "");
-          const rawContent = this.graph.getFileContent(safePath);
-
-          if (rawContent === undefined) {
-            throw new Error(`File '${safePath}' not found in project index.`);
-          }
-
-          // Secret Redaction prior to returning data to context
-          const { redactedText } = SecretRedactor.redact(rawContent);
-          const lines = redactedText.split("\n");
-
-          const startLine = Math.max(1, Number(args["startLine"] || 1));
-          const endLine = Math.min(lines.length, Number(args["endLine"] || lines.length));
-
-          data = {
-            path: safePath,
-            totalLines: lines.length,
-            startLine,
-            endLine,
-            content: lines.slice(startLine - 1, endLine).join("\n"),
-          };
-          break;
-        }
-
+        // ── Phase 2 Tools ────────────────────────────────────────────────────
         case "search_symbols": {
-          const name = String(args["name"] || "");
-          const exact = this.graph.findSymbol(name);
-          const searched = this.graph.searchSymbols(name);
-          data = exact.length > 0 ? exact : searched;
+          data = SearchSymbolsTool.execute(this.graph, { name: String(args["name"] || "") });
           break;
         }
 
         case "find_references": {
-          const symbolOrPath = String(args["target"] || "");
-          const dependents = this.graph.findDependents(symbolOrPath);
-          const transitiveDependents = this.graph.getTransitiveDependents(symbolOrPath);
-          data = {
-            target: symbolOrPath,
-            dependents,
-            transitiveDependents,
-            message: `Found ${dependents.length} direct and ${transitiveDependents.length} transitive file(s) that depend on '${symbolOrPath}'`,
-          };
+          data = FindReferencesTool.execute(this.graph, { target: String(args["target"] || "") });
+          break;
+        }
+
+        case "get_project_structure": {
+          data = GetProjectStructureTool.execute(this.graph);
+          break;
+        }
+
+        case "retrieve_code":
+        case "get_file":
+        case "read_file": {
+          data = RetrieveCodeTool.execute(this.graph, {
+            path: String(args["path"] || args["filePath"] || ""),
+            startLine: args["startLine"] ? Number(args["startLine"]) : undefined,
+            endLine: args["endLine"] ? Number(args["endLine"]) : undefined,
+          });
+          break;
+        }
+
+        case "find_api_routes": {
+          data = FindApiRoutesTool.execute(
+            this.graph,
+            {
+              method: args["method"] ? String(args["method"]) : undefined,
+              routePrefix: args["routePrefix"] ? String(args["routePrefix"]) : undefined,
+            },
+            this.ws,
+          );
+          break;
+        }
+
+        case "find_database_usage": {
+          data = FindDatabaseUsageTool.execute(
+            this.graph,
+            { tableName: args["tableName"] ? String(args["tableName"]) : undefined },
+            this.ws,
+          );
+          break;
+        }
+
+        case "architecture_summary": {
+          data = ArchitectureSummaryTool.execute(this.graph);
+          break;
+        }
+
+        case "dependency_impact": {
+          data = DependencyImpactTool.execute(this.graph, { target: String(args["target"] || "") });
+          break;
+        }
+
+        // ── Existing / Compatibility Tools ───────────────────────────────────
+        case "search_project": {
+          const query = String(args["query"] || "");
+          const limit = Math.min(20, Math.max(1, Number(args["limit"] || 5)));
+          data = this.graph.search(query, limit);
           break;
         }
 
@@ -192,16 +248,6 @@ export class AIToolExecutor {
         case "analyze_dependencies": {
           const packageJson = this.graph.getFileContent("package.json") || "";
           data = DependencyScanner.scan(packageJson);
-          break;
-        }
-
-        case "get_project_structure": {
-          data = {
-            metrics: this.graph.getMetrics(),
-            structure: this.graph.getStructureTree(),
-            architectureProfile: this.graph.getArchitectureProfile(),
-            cycles: this.graph.getCycles(),
-          };
           break;
         }
 

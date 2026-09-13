@@ -10,6 +10,7 @@ const serverEnvSchema = z.object({
   GEMINI_API_KEY: z.string().min(10).optional(),
   OPENAI_API_KEY: z.string().min(10).optional(),
   ANTHROPIC_API_KEY: z.string().min(10).optional(),
+  OLLAMA_BASE_URL: z.string().url().optional(),
   SUPABASE_URL: z.string().url().optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(10).optional(),
   UPSTASH_REDIS_REST_URL: z.string().url().optional(),
@@ -32,6 +33,7 @@ export function getServerEnv(): ServerEnv {
     GEMINI_API_KEY: process.env["GEMINI_API_KEY"]?.trim(),
     OPENAI_API_KEY: process.env["OPENAI_API_KEY"]?.trim(),
     ANTHROPIC_API_KEY: process.env["ANTHROPIC_API_KEY"]?.trim(),
+    OLLAMA_BASE_URL: process.env["OLLAMA_BASE_URL"]?.trim(),
     SUPABASE_URL: process.env["SUPABASE_URL"]?.trim() || process.env["VITE_SUPABASE_URL"]?.trim(),
     SUPABASE_SERVICE_ROLE_KEY: process.env["SUPABASE_SERVICE_ROLE_KEY"]?.trim(),
     UPSTASH_REDIS_REST_URL: process.env["UPSTASH_REDIS_REST_URL"]?.trim(),
@@ -52,7 +54,7 @@ export function getServerEnv(): ServerEnv {
 /**
  * Checks whether an external AI model provider is configured on the server.
  */
-export function isProviderConfigured(provider: "gemini" | "openai" | "anthropic"): boolean {
+export function isProviderConfigured(provider: "gemini" | "openai" | "anthropic" | "ollama"): boolean {
   try {
     const env = getServerEnv();
     switch (provider) {
@@ -62,6 +64,8 @@ export function isProviderConfigured(provider: "gemini" | "openai" | "anthropic"
         return Boolean(env.OPENAI_API_KEY);
       case "anthropic":
         return Boolean(env.ANTHROPIC_API_KEY);
+      case "ollama":
+        return Boolean(env.OLLAMA_BASE_URL || process.env["ENABLE_OLLAMA"] === "true");
       default:
         return false;
     }
