@@ -15,6 +15,8 @@ import { TestRunner } from "../testing/test-runner";
 import { TestPlanner } from "../testing/test-planner";
 import { PatchApplier } from "./patch-applier";
 import { FixPlanner } from "./fix-planner";
+import { PatchGenerator } from "./patch-generator";
+import { timingSafeEqual } from "../ai/approval-gate";
 import type { FixProposal, Patch, VerificationResult, FixIterationState } from "./fix-types";
 
 export interface VerifyFixOptions {
@@ -28,6 +30,7 @@ export interface VerifyFixOptions {
   workspacePath?: string | undefined;
   iterationState?: FixIterationState | undefined;
   requestId?: string | undefined;
+  prePatchFileHashes?: Map<string, string> | Record<string, string> | undefined;
 }
 
 export class FixVerificationEngine {
@@ -81,8 +84,51 @@ export class FixVerificationEngine {
 
     // 2. Diff & File Integrity Check
     const unexpectedChanges: string[] = [];
-    const patchFilePaths = patch.files.map((f) => f.path);
-    // In our single-patch application, only patch.files were modified
+    const patchFilePaths = new Set(patch.files.map((f) => f.path));
+
+    // A. Verify all patch files adhere strictly to expected post-patch hashes
+    for (const pFile of patch.files) {
+      const content = graph.getFileContent(pFile.path);
+      if (pFile.operation === "delete") {
+        if (content !== undefined) {
+          unexpectedChanges.push(`Deletion failure: File '${pFile.path}' still exists after delete operation.`);
+        }
+      } else {
+        if (content === undefined) {
+          unexpectedChanges.push(`Missing file: File '${pFile.path}' not found after ${pFile.operation} operation.`);
+        } else if (pFile.newHash) {
+          const currentHash = PatchGenerator.sha256(content);
+          if (!timingSafeEqual(currentHash, pFile.newHash)) {
+            unexpectedChanges.push(
+              `Hash mismatch on '${pFile.path}': Expected SHA-256 '${pFile.newHash}', got '${currentHash}'.`,
+            );
+          }
+        }
+      }
+    }
+
+    // B. Check for unapproved out-of-scope modifications if pre-patch baseline is provided
+    if (options.prePatchFileHashes) {
+      const baseline =
+        options.prePatchFileHashes instanceof Map
+          ? options.prePatchFileHashes
+          : new Map(Object.entries(options.prePatchFileHashes));
+
+      for (const [filePath, oldHash] of baseline.entries()) {
+        if (!patchFilePaths.has(filePath)) {
+          const currentContent = graph.getFileContent(filePath);
+          if (currentContent === undefined) {
+            unexpectedChanges.push(`Unexpected file deletion: '${filePath}' was removed outside approved patch scope.`);
+          } else {
+            const currentHash = PatchGenerator.sha256(currentContent);
+            if (!timingSafeEqual(currentHash, oldHash)) {
+              unexpectedChanges.push(`Unexpected file modification: '${filePath}' was modified outside approved patch scope.`);
+            }
+          }
+        }
+      }
+    }
+
     const patchIntegrityPassed = unexpectedChanges.length === 0;
 
     // 3. Targeted Test Execution
@@ -151,7 +197,7 @@ export class FixVerificationEngine {
 
     let explanation = overallSuccess
       ? "All verification checks passed: targeted tests passed, no security regressions detected, and project knowledge graph re-indexed successfully."
-      : `Verification failed: ${[!testsPassed && "targeted tests failed", !securityPassed && "security vulnerability still detected", !regressionPassed && "new security/regression findings introduced"].filter(Boolean).join(", ")}.`;
+      : `Verification failed: ${[!testsPassed && "targeted tests failed", !securityPassed && "security vulnerability still detected", !regressionPassed && "new security/regression findings introduced", !patchIntegrityPassed && "unexpected changes or integrity failure detected"].filter(Boolean).join(", ")}.`;
 
     const verification: VerificationResult = {
       success: overallSuccess,
@@ -172,7 +218,7 @@ export class FixVerificationEngine {
       projectId,
       operation: "FIX_VERIFICATION_COMPLETED",
       status: overallSuccess ? "success" : "failed",
-      targetFiles: patchFilePaths,
+      targetFiles: Array.from(patchFilePaths),
       patchHash: patch.diffHash,
       approvalId,
       details: explanation,
@@ -201,8 +247,10 @@ export class FixVerificationEngine {
         });
 
         // CRITICAL NON-NEGOTIABLE RULE: Subsequent proposal REQUIRES A BRAND NEW APPROVAL
-        nextProposal.requiresApproval = true;
-        currentState.activeProposal = nextProposal;
+        if (nextProposal) {
+          nextProposal.requiresApproval = true;
+          currentState.activeProposal = nextProposal;
+        }
       } else {
         explanation += " Maximum fix iterations (3) reached. Halting autonomous repair loop.";
         verification.explanation = explanation;

@@ -58,20 +58,10 @@ export function useAuth(): AuthState {
     };
   }, []);
 
-  const isDemo = typeof window !== "undefined" && localStorage.getItem("hacksync:demo_auth") === "true";
-  const demoUser: User = {
-    id: "demo-judge-user",
-    email: "judge@hacksync.dev",
-    app_metadata: {},
-    user_metadata: { display_name: "Hackathon Judge" },
-    aud: "authenticated",
-    created_at: new Date().toISOString(),
-  };
-
   return {
-    session: session ?? (isDemo ? ({ user: demoUser } as Session) : null),
-    user: session?.user ?? (isDemo ? demoUser : null),
-    loading: isDemo ? false : loading,
+    session,
+    user: session?.user ?? null,
+    loading,
     error,
   };
 }

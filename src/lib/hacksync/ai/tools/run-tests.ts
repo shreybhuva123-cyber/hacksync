@@ -9,6 +9,8 @@ import { SandboxRunner } from "../../testing/sandbox-runner";
 import { TestRunner } from "../../testing/test-runner";
 import type { TestRun, TestRunnerOptions } from "../../testing/test-types";
 
+import { AuthorizationError } from "@/lib/errors";
+
 export interface RunTestsParams {
   command?: string | undefined;
   targetFile?: string | undefined;
@@ -20,8 +22,11 @@ export class RunTestsTool {
   static async execute(
     graph: ProjectKnowledgeGraph,
     params: RunTestsParams = {},
-    projectId = "default-project",
+    projectId: string,
   ): Promise<TestRun> {
+    if (!projectId || projectId === "default-project" || projectId.trim() === "") {
+      throw new AuthorizationError("[RunTestsTool] Authorized projectId is mandatory.");
+    }
     const command = params.command || (params.targetFile ? `bun test ${params.targetFile}` : "bun test");
 
     if (params.workspacePath) {

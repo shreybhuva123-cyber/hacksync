@@ -685,8 +685,8 @@ ALTER TABLE public.file_versions ENABLE ROW LEVEL SECURITY;
 GRANT ALL ON public.file_versions TO authenticated, service_role;
 
 DROP POLICY IF EXISTS "file_versions_select_policy" ON public.file_versions;
-CREATE POLICY "file_versions_select_policy" ON public.file_versions FOR SELECT USING (true);
+CREATE POLICY "file_versions_select_policy" ON public.file_versions FOR SELECT TO authenticated USING (auth.uid() IS NOT NULL AND public.can_view_project(project_id));
 
 DROP POLICY IF EXISTS "file_versions_insert_policy" ON public.file_versions;
-CREATE POLICY "file_versions_insert_policy" ON public.file_versions FOR INSERT WITH CHECK (true);
+CREATE POLICY "file_versions_insert_policy" ON public.file_versions FOR INSERT TO authenticated WITH CHECK (auth.uid() IS NOT NULL AND public.can_view_project(project_id));
 

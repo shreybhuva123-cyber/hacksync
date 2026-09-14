@@ -1,7 +1,9 @@
 /**
- * Sandbox Runner — HackSync Phase 4
- * Creates isolated temporary workspaces for safe test execution and patch validation.
- * Cleans up workspaces automatically after execution and redacts sensitive data.
+ * Isolated Test Workspace Runner — HackSync Phase 4
+ * Creates isolated temporary directory trees for safe test execution and patch validation.
+ * Cleans up temporary workspaces automatically after execution and strips secrets.
+ *
+ * NOTE: Operates as an isolated filesystem workspace copy. Does not claim VM/OS kernel isolation.
  */
 
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync } from "fs";
@@ -11,6 +13,9 @@ import { TestRunner } from "./test-runner";
 import type { TestRun, TestRunnerOptions } from "./test-types";
 import type { Patch } from "../fixing/fix-types";
 import type { ProjectKnowledgeGraph } from "../intelligence/knowledge-graph";
+import { applyUnifiedDiff } from "../fixing/patch-applier";
+import { PatchGenerator } from "../fixing/patch-generator";
+import { timingSafeEqual } from "../ai/approval-gate";
 
 export interface SandboxExecutionParams {
   projectId: string;
@@ -23,7 +28,7 @@ export interface SandboxExecutionParams {
 
 export class SandboxRunner {
   /**
-   * Executes a test command in a fully isolated temporary workspace copy.
+   * Executes a test command in an isolated temporary workspace copy.
    */
   static async runInSandbox(params: {
     projectId: string;
@@ -33,13 +38,13 @@ export class SandboxRunner {
     extraArgs?: string[] | undefined;
     options?: TestRunnerOptions | undefined;
   }): Promise<TestRun> {
-    const sandboxDir = mkdtempSync(join(tmpdir(), `hacksync-sandbox-${params.projectId}-`));
+    const sandboxDir = mkdtempSync(join(tmpdir(), `hacksync-workspace-${params.projectId}-`));
 
     try {
-      // 1. Populate sandbox workspace with files from KnowledgeGraph
+      // 1. Populate isolated workspace with files from KnowledgeGraph
       const allFiles = params.graph.getAllFilePaths();
       for (const filePath of allFiles) {
-        // Strip production .env files from sandbox to prevent credential leakage
+        // Strip production .env files from workspace to prevent credential leakage
         if (filePath === ".env" || filePath.startsWith(".env.")) {
           continue;
         }
@@ -55,11 +60,11 @@ export class SandboxRunner {
         }
       }
 
-      // Add safe sandbox environment variables mock
+      // Add safe test workspace environment variables mock
       const safeEnvMock = "NODE_ENV=test\nCI=true\n";
       writeFileSync(join(sandboxDir, ".env.sandbox"), safeEnvMock, "utf-8");
 
-      // 2. Apply patch in sandbox if provided
+      // 2. Apply patch in isolated workspace if provided
       if (params.patch) {
         for (const pFile of params.patch.files) {
           const targetPath = join(sandboxDir, pFile.path);
@@ -73,10 +78,19 @@ export class SandboxRunner {
               rmSync(targetPath, { force: true });
             }
           } else {
-            // Apply new content
-            const content = params.graph.getFileContent(pFile.path) || "";
-            // If unified diff, calculate new content or write new content
-            writeFileSync(targetPath, content, "utf-8");
+            const originalContent = params.graph.getFileContent(pFile.path) || "";
+            const patchedContent = applyUnifiedDiff(pFile.diff, originalContent);
+
+            if (pFile.newHash) {
+              const computedHash = PatchGenerator.sha256(patchedContent);
+              if (!timingSafeEqual(computedHash, pFile.newHash)) {
+                throw new Error(
+                  `[SandboxRunner] Hash mismatch when applying patch to isolated workspace for '${pFile.path}'. Expected '${pFile.newHash}', got '${computedHash}'.`,
+                );
+              }
+            }
+
+            writeFileSync(targetPath, patchedContent, "utf-8");
           }
         }
       }

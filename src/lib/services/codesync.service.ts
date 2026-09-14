@@ -13,6 +13,7 @@ import {
   computeFastHash,
   computeSha256,
 } from "@/lib/hacksync/merge-engine";
+import { transitionSyncState } from "@/lib/hacksync/types";
 import type {
   CodeNode,
   Member,
@@ -24,6 +25,8 @@ import type {
   Area,
   FileVersion,
   MemberContribution,
+  CodeSyncState,
+  CodeSyncTransition,
 } from "@/lib/hacksync/types";
 
 export interface CodeSyncPreviewResult {
@@ -43,6 +46,58 @@ export interface CodeSyncPreviewResult {
 
 // Concurrency mutex lock to prevent concurrent CodeSync corruption (Requirement #29)
 let isSyncExecutionLocked = false;
+
+/**
+ * Explicit CodeSync State Machine Manager
+ * Guarantees that sync progression follows deterministic states (LOCAL_ONLY -> PENDING_SYNC -> SYNCING -> SYNCED/SYNC_FAILED/CONFLICT).
+ * Ensures local member files are never overwritten or discarded on synchronization failures.
+ */
+export class CodeSyncStateMachine {
+  private static projectStates = new Map<string, CodeSyncState>();
+  private static stateHistory = new Map<string, CodeSyncTransition[]>();
+
+  static getState(projectId: string): CodeSyncState {
+    return this.projectStates.get(projectId) || "LOCAL_ONLY";
+  }
+
+  static transition(
+    projectId: string,
+    targetState: CodeSyncState,
+    reason?: string,
+    error?: string,
+  ): CodeSyncState {
+    const current = this.getState(projectId);
+    const result = transitionSyncState(current, targetState, reason);
+    if (!result.allowed) {
+      throw new Error(result.error);
+    }
+    this.projectStates.set(projectId, targetState);
+    const history = this.stateHistory.get(projectId) || [];
+    history.push({
+      from: current,
+      to: targetState,
+      timestamp: new Date().toISOString(),
+      reason,
+      error,
+    });
+    this.stateHistory.set(projectId, history);
+    return targetState;
+  }
+
+  static getHistory(projectId: string): CodeSyncTransition[] {
+    return this.stateHistory.get(projectId) || [];
+  }
+
+  static reset(projectId?: string) {
+    if (projectId) {
+      this.projectStates.delete(projectId);
+      this.stateHistory.delete(projectId);
+    } else {
+      this.projectStates.clear();
+      this.stateHistory.clear();
+    }
+  }
+}
 
 /**
  * Timeout wrapper for database calls so unit tests and offline environments never hang indefinitely
@@ -388,7 +443,7 @@ export const codeSyncService = {
 
         let changeType: "added" | "modified" | "unchanged" = "added";
         if (sharedNode) {
-          if (sharedNode.content?.trim() === file.content?.trim()) {
+          if (sharedNode.content === file.content) {
             changeType = "unchanged";
           } else {
             changeType = "modified";
@@ -440,6 +495,21 @@ export const codeSyncService = {
       else if (item.changeType === "unchanged") unchangedCount++;
     }
 
+    // Explicit state machine transitions based on preview analysis
+    if (conflicts.length > 0) {
+      const curr = CodeSyncStateMachine.getState(projectId);
+      // Must reach PENDING_SYNC first for states that can't go directly to CONFLICT
+      if (curr === "LOCAL_ONLY" || curr === "SYNCED" || curr === "SYNC_FAILED" || curr === "RESOLVED") {
+        CodeSyncStateMachine.transition(projectId, "PENDING_SYNC", "Preview generated with conflicts");
+      }
+      CodeSyncStateMachine.transition(projectId, "CONFLICT", "Unresolved merge conflicts detected in preview");
+    } else if (previewItems.length > 0) {
+      const curr = CodeSyncStateMachine.getState(projectId);
+      if (curr === "LOCAL_ONLY" || curr === "SYNCED" || curr === "SYNC_FAILED" || curr === "RESOLVED") {
+        CodeSyncStateMachine.transition(projectId, "PENDING_SYNC", "Preview ready for synchronization");
+      }
+    }
+
     return {
       items: previewItems,
       conflicts,
@@ -454,6 +524,25 @@ export const codeSyncService = {
       },
       trackBreakdown,
     };
+  },
+
+  /**
+   * State Machine inspection & transition helpers
+   */
+  getSyncState(projectId: string): CodeSyncState {
+    return CodeSyncStateMachine.getState(projectId);
+  },
+
+  transitionSyncState(projectId: string, targetState: CodeSyncState, reason?: string): CodeSyncState {
+    return CodeSyncStateMachine.transition(projectId, targetState, reason);
+  },
+
+  getSyncStateHistory(projectId: string): CodeSyncTransition[] {
+    return CodeSyncStateMachine.getHistory(projectId);
+  },
+
+  resetSyncState(projectId?: string): void {
+    CodeSyncStateMachine.reset(projectId);
   },
 
   /**
@@ -482,6 +571,15 @@ export const codeSyncService = {
     if (isSyncExecutionLocked) {
       throw new Error("A CodeSync operation is currently in progress. Please wait for it to complete.");
     }
+
+    const startState = CodeSyncStateMachine.getState(projectId);
+    if (startState === "LOCAL_ONLY" || startState === "SYNCED") {
+      CodeSyncStateMachine.transition(projectId, "PENDING_SYNC", "Auto-advancing to pending before sync");
+    } else if (startState === "CONFLICT") {
+      CodeSyncStateMachine.transition(projectId, "RESOLVED", "Conflicts marked resolved before executing sync");
+      CodeSyncStateMachine.transition(projectId, "PENDING_SYNC", "Ready to sync resolved items");
+    }
+    CodeSyncStateMachine.transition(projectId, "SYNCING", "CodeSync merge execution started");
 
     try {
       isSyncExecutionLocked = true;
@@ -536,6 +634,51 @@ export const codeSyncService = {
             : item.changeType === "auto_merged"
               ? "auto_merge"
               : (options.conflictsResolvedCount && options.conflictsResolvedCount > 0 ? "manual_merge" : "edit");
+
+          // Handle file deletion
+          if (item.changeType === "deleted") {
+            if (existing && existing.id) {
+              // Soft-delete: mark node as deleted rather than removing data
+              await withDbTimeout(
+                supabase
+                  .from("code_nodes")
+                  .update({
+                    status: "deleted",
+                    content: "",
+                    updated_at: new Date().toISOString(),
+                  } as any)
+                  .eq("id", existing.id),
+                750,
+              );
+            }
+            // Record deletion version
+            const deleteVersion: FileVersion = {
+              id: `fv-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+              project_id: projectId,
+              node_id: existing?.id || null,
+              file_path: cleanPath,
+              version_number: nextVer,
+              content: "",
+              content_hash: computeFastHash(""),
+              base_version_number: existing ? currentVer : null,
+              parent_version_number: existing ? currentVer : null,
+              created_by_user_id: null,
+              created_by_name: actorName,
+              created_by_role: actorRole,
+              contributors: itemContributors,
+              change_summary: `CodeSync #${sessionNum}: deleted by ${itemContributors.join(", ")}`,
+              change_type: "delete",
+              created_at: new Date().toISOString(),
+            };
+            saveStoredFileVersion(projectId, deleteVersion);
+            createdVersions.push(deleteVersion);
+            return; // Skip upsert logic for deleted files
+          }
+
+          // Skip unchanged files — no version bump, no DB write needed
+          if (item.changeType === "unchanged" && existing && existing.content === item.content) {
+            return;
+          }
 
           let nodeId = existing?.id;
 
@@ -709,10 +852,75 @@ export const codeSyncService = {
         750,
       );
 
+      CodeSyncStateMachine.transition(projectId, "SYNCED", "CodeSync merge executed successfully");
+
       return session;
+    } catch (err: any) {
+      CodeSyncStateMachine.transition(
+        projectId,
+        "SYNC_FAILED",
+        `Sync execution failure: ${err?.message || "Unknown error"}`,
+        err?.message,
+      );
+      throw err;
     } finally {
       isSyncExecutionLocked = false;
     }
+  },
+
+  /**
+   * Executes CodeSync with automatic retry and exponential backoff.
+   * Retries up to maxRetries times on transient failures (network, timeout).
+   */
+  async executeWithRetry(
+    projectId: string,
+    resolvedItems: {
+      path: string;
+      content: string;
+      area: Area;
+      language: string;
+      ownerRole: string;
+      contributors: string[];
+      changeType?: "added" | "modified" | "auto_merged" | "unchanged" | "deleted" | undefined;
+    }[],
+    actorName: string,
+    actorRole: Role = "lead",
+    options: {
+      sessionNumber?: number;
+      autoMergedCount?: number;
+      conflictsResolvedCount?: number;
+      maxRetries?: number;
+    } = {},
+  ): Promise<SyncSession> {
+    const maxRetries = options.maxRetries ?? 3;
+    let lastError: Error | null = null;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        return await this.executeCodeSync(projectId, resolvedItems as any, actorName, actorRole, options);
+      } catch (err: any) {
+        lastError = err;
+        const isTransient = err?.message?.includes("ECONNRESET") ||
+          err?.message?.includes("timeout") ||
+          err?.message?.includes("network") ||
+          err?.message?.includes("currently in progress");
+
+        if (!isTransient || attempt >= maxRetries) {
+          throw err;
+        }
+
+        // Exponential backoff: 500ms, 1s, 2s
+        const backoffMs = Math.min(500 * Math.pow(2, attempt), 4000);
+        await new Promise((resolve) => setTimeout(resolve, backoffMs));
+
+        // Reset state machine for retry
+        const currentState = CodeSyncStateMachine.getState(projectId);
+        if (currentState === "SYNC_FAILED") {
+          CodeSyncStateMachine.transition(projectId, "PENDING_SYNC", `Retry attempt ${attempt + 1}/${maxRetries}`);
+        }
+      }
+    }
+    throw lastError || new Error("CodeSync retry exhausted");
   },
 
   /**

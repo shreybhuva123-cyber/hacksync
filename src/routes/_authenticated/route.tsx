@@ -11,24 +11,10 @@ import { logger } from "@/lib/errors";
 export const Route = createFileRoute("/_authenticated")({
   ssr: false,
   beforeLoad: async ({ location }) => {
-    if (typeof window !== "undefined" && localStorage.getItem("hacksync:demo_auth") === "true") {
-      return {
-        user: {
-          id: "demo-judge-user",
-          email: "judge@hacksync.dev",
-          app_metadata: {},
-          user_metadata: { display_name: "Hackathon Judge" },
-          aud: "authenticated",
-          created_at: new Date().toISOString(),
-        },
-      };
-    }
-
     try {
       const { data, error } = await supabase.auth.getUser();
 
       if (error || !data?.user) {
-
         logger.info("Unauthenticated route access attempt, redirecting to /auth", {
           path: location.pathname,
         });
@@ -43,18 +29,6 @@ export const Route = createFileRoute("/_authenticated")({
       return { user: data.user };
     } catch (err) {
       if ((err as { isRedirect?: boolean })?.isRedirect) throw err;
-      if (typeof window !== "undefined" && localStorage.getItem("hacksync:demo_auth") === "true") {
-        return {
-          user: {
-            id: "demo-judge-user",
-            email: "judge@hacksync.dev",
-            app_metadata: {},
-            user_metadata: { display_name: "Hackathon Judge" },
-            aud: "authenticated",
-            created_at: new Date().toISOString(),
-          },
-        };
-      }
       throw redirect({
         to: "/auth",
         search: {

@@ -410,4 +410,50 @@ export interface GitHubPushRecord {
   created_at: string;
 }
 
+export type CodeSyncState =
+  | "LOCAL_ONLY"
+  | "PENDING_SYNC"
+  | "SYNCING"
+  | "SYNCED"
+  | "SYNC_FAILED"
+  | "CONFLICT"
+  | "RESOLVED";
+
+export interface CodeSyncTransition {
+  from: CodeSyncState;
+  to: CodeSyncState;
+  timestamp: string;
+  reason?: string | undefined;
+  error?: string | undefined;
+}
+
+export const VALID_CODESYNC_TRANSITIONS: Record<CodeSyncState, CodeSyncState[]> = {
+  LOCAL_ONLY: ["PENDING_SYNC"],
+  PENDING_SYNC: ["SYNCING", "LOCAL_ONLY", "CONFLICT"],
+  SYNCING: ["SYNCED", "SYNC_FAILED", "CONFLICT"],
+  SYNCED: ["LOCAL_ONLY", "PENDING_SYNC"],
+  SYNC_FAILED: ["PENDING_SYNC", "LOCAL_ONLY", "SYNCING"],
+  CONFLICT: ["RESOLVED", "SYNC_FAILED", "LOCAL_ONLY", "PENDING_SYNC"],
+  RESOLVED: ["PENDING_SYNC", "SYNCING", "LOCAL_ONLY"],
+};
+
+export function transitionSyncState(
+  currentState: CodeSyncState,
+  targetState: CodeSyncState,
+  reason?: string,
+): { allowed: boolean; nextState: CodeSyncState; error?: string } {
+  const allowedNext = VALID_CODESYNC_TRANSITIONS[currentState] || [];
+  if (currentState === targetState) {
+    return { allowed: true, nextState: targetState };
+  }
+  if (!allowedNext.includes(targetState)) {
+    return {
+      allowed: false,
+      nextState: currentState,
+      error: `Invalid CodeSync state transition from '${currentState}' to '${targetState}'. Allowed transitions: [${allowedNext.join(", ")}]. Reason: ${reason || "none"}`,
+    };
+  }
+  return { allowed: true, nextState: targetState };
+}
+
 

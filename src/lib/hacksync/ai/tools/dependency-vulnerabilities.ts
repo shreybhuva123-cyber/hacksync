@@ -7,6 +7,8 @@
 import type { ProjectKnowledgeGraph } from "../../intelligence/knowledge-graph";
 import { DependencyVulnerabilityScanner, type DependencyScanResult } from "../../security/dependency-vulnerability-scanner";
 
+import { AuthorizationError } from "@/lib/errors";
+
 export interface DependencyVulnerabilitiesParams {
   manifestFile?: string | undefined;
 }
@@ -15,8 +17,11 @@ export class DependencyVulnerabilitiesTool {
   static execute(
     graph: ProjectKnowledgeGraph,
     params: DependencyVulnerabilitiesParams = {},
-    projectId = "default-project",
+    projectId: string,
   ): DependencyScanResult {
+    if (!projectId || projectId === "default-project" || projectId.trim() === "") {
+      throw new AuthorizationError("[DependencyVulnerabilitiesTool] Authorized projectId is mandatory.");
+    }
     const targetManifest = params.manifestFile || "package.json";
     const content = graph.getFileContent(targetManifest) || "";
 

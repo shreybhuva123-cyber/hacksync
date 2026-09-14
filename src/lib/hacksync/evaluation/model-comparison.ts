@@ -42,9 +42,30 @@ export interface ModelComparisonResult {
   modelAScoreWins: number;
   modelBScoreWins: number;
   summary: string;
+  isCircularEvaluation?: boolean | undefined;
+  circularEvaluationWarning?: string | undefined;
 }
 
 export class ModelComparisonEngine {
+  /**
+   * Detects circular evaluation where judge model matches the generator/evaluated model.
+   * LLMs evaluating their own generations exhibit strong self-preference bias.
+   */
+  static detectCircularEvaluation(
+    generator: { provider: string; model: string },
+    judge: { provider: string; model: string },
+  ): { isCircular: boolean; warning?: string } {
+    const genKey = `${generator.provider.trim().toLowerCase()}/${generator.model.trim().toLowerCase()}`;
+    const judgeKey = `${judge.provider.trim().toLowerCase()}/${judge.model.trim().toLowerCase()}`;
+    if (genKey === judgeKey) {
+      return {
+        isCircular: true,
+        warning: `[CIRCULAR_EVALUATION] Judge model '${judgeKey}' is identical to generator model '${genKey}'. Self-evaluations suffer from significant self-preference bias.`,
+      };
+    }
+    return { isCircular: false };
+  }
+
   /**
    * Evaluates if a model provider violates project privacy policy.
    * If local_only is true, only local providers ('ollama', 'local', 'builtin') are allowed.
@@ -165,10 +186,19 @@ export class ModelComparisonEngine {
 
     const nameA = `${modelA.provider}/${modelA.model}`;
     const nameB = `${modelB.provider}/${modelB.model}`;
-    const summary =
+
+    const circularCheck = this.detectCircularEvaluation(modelA, modelB);
+    const isCircularEvaluation = circularCheck.isCircular;
+    const circularEvaluationWarning = circularCheck.warning;
+
+    let summary =
       overallWinner === "TIE"
         ? `Tie between ${nameA} and ${nameB} across benchmark categories.`
         : `${overallWinner === "A" ? nameA : nameB} wins multi-metric evaluation (${overallWinner === "A" ? winsA : winsB} metric wins, weighted score: ${Math.max(weightedScoreA, weightedScoreB).toFixed(1)} vs ${Math.min(weightedScoreA, weightedScoreB).toFixed(1)}).`;
+
+    if (isCircularEvaluation && circularEvaluationWarning) {
+      summary = `${circularEvaluationWarning} ${summary}`;
+    }
 
     return {
       modelA: { provider: modelA.provider, model: modelA.model },
@@ -179,6 +209,8 @@ export class ModelComparisonEngine {
       modelAScoreWins: winsA,
       modelBScoreWins: winsB,
       summary,
+      isCircularEvaluation,
+      circularEvaluationWarning,
     };
   }
 

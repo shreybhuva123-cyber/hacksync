@@ -69,7 +69,7 @@ const steps: ValidationStep[] = [
     category: "Performance",
     label: "Real-Repo Scaling & Stress Validation",
     command: "bun",
-    args: ["test", "src/tests/validation"],
+    args: ["test", "src/tests/validation", "src/tests/performance"],
   },
   {
     category: "Build",

@@ -7,8 +7,9 @@
 import type { ProjectKnowledgeGraph } from "../intelligence/knowledge-graph";
 import type { SecurityFinding } from "../security/finding-types";
 import type { VerifiedEvidenceItem } from "../ai/tool-types";
-import { PatchGenerator } from "./patch-generator";
 import type { FixProposal } from "./fix-types";
+import { PatchGenerator } from "./patch-generator";
+import { AuthorizationError } from "@/lib/errors";
 
 export interface PlanFixOptions {
   projectId: string;
@@ -27,7 +28,11 @@ export class FixPlanner {
   ): FixProposal {
     const isSingleObject = typeof graphOrOptions === "object" && "graph" in graphOrOptions && "projectId" in graphOrOptions;
     const graph: ProjectKnowledgeGraph = isSingleObject ? (graphOrOptions as any).graph : (graphOrOptions as ProjectKnowledgeGraph);
-    const options: PlanFixOptions = isSingleObject ? (graphOrOptions as PlanFixOptions) : (maybeOptions || { projectId: "default-project" });
+    const options: PlanFixOptions = isSingleObject ? (graphOrOptions as PlanFixOptions) : (maybeOptions as PlanFixOptions);
+
+    if (!options || !options.projectId || options.projectId === "default-project" || options.projectId.trim() === "") {
+      throw new AuthorizationError("[FixPlanner] Authorized projectId is mandatory to plan a fix.");
+    }
 
     const finding = options.finding;
     const filePath = options.filePath || finding?.filePath;

@@ -40,7 +40,25 @@ jobs:
         run: bun test --timeout 15000
 
       - name: Dependency Security Audit
-        run: bun pm ls --all 2>&1 | head -100
+        run: |
+          echo "=== Dependency Tree ==="
+          bun pm ls --all 2>&1 | head -100
+          echo ""
+          echo "=== Known Vulnerability Check ==="
+          # Check for known vulnerable package patterns
+          FAILED=0
+          for pkg in "event-stream@3.3.6" "ua-parser-js@0.7.28" "colors@1.4.1" "node-ipc@10.1.1"; do
+            if bun pm ls --all 2>&1 | grep -q "$pkg"; then
+              echo "❌ VULNERABLE: $pkg found in dependency tree"
+              FAILED=1
+            fi
+          done
+          # Verify no http:// registry URLs (supply chain risk)
+          if grep -r 'http://' bun.lockb 2>/dev/null || grep -rn '"http://' package.json 2>/dev/null; then
+            echo "⚠️ WARNING: HTTP registry URL detected (use HTTPS)"
+          fi
+          if [ $FAILED -ne 0 ]; then exit 1; fi
+          echo "✅ No known vulnerable packages detected"
         continue-on-error: true
 
       - name: Validate SQL Migration Files

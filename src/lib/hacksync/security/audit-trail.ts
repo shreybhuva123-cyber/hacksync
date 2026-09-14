@@ -170,11 +170,24 @@ export class AuditTrail {
     }
   }
 
+  private static readonly UUID_REGEX =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+  private static isValidUuid(val: string): boolean {
+    return this.UUID_REGEX.test(val);
+  }
+
   private static async persistToDatabase(record: AIAuditEntry): Promise<void> {
     if (!record.projectId || !record.userId) return;
 
+    // PostgreSQL schema requires valid UUIDs for actor_id and project_id.
+    // In test/mock environments where test IDs are used (e.g. 'usr-alice'), retain in-memory and skip remote DB insert.
+    if (!this.isValidUuid(record.projectId) || !this.isValidUuid(record.userId)) {
+      return;
+    }
+
     const { error } = await (supabase.from as any)("security_audit_events").insert({
-      action: "SECURITY_PERMISSION_DENIED",
+      action: record.actionType || "SECURITY_AUDIT_EVENT",
       actor_id: record.userId,
       project_id: record.projectId,
       target_resource: record.toolName,

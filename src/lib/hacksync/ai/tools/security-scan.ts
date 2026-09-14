@@ -9,6 +9,8 @@ import type { Workspace } from "../../types";
 import { StaticAuditor } from "../../security/static-auditor";
 import type { SecurityReport } from "../../security/finding-types";
 
+import { AuthorizationError } from "@/lib/errors";
+
 export interface SecurityScanParams {
   targetFile?: string | undefined;
 }
@@ -17,9 +19,12 @@ export class SecurityScanTool {
   static execute(
     graph: ProjectKnowledgeGraph,
     params: SecurityScanParams = {},
-    projectId = "default-project",
+    projectId: string,
     ws?: Workspace | null,
   ): SecurityReport {
+    if (!projectId || projectId === "default-project" || projectId.trim() === "") {
+      throw new AuthorizationError("[SecurityScanTool] Authorized projectId is mandatory.");
+    }
     return StaticAuditor.runPassiveAudit({
       graph,
       projectId,

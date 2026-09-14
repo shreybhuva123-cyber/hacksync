@@ -25,6 +25,9 @@ export interface RegressionComparisonResult {
   hasRegressions: boolean;
   regressions: DetectedRegression[];
   summary: string;
+  sampleSize?: number | undefined;
+  insufficientSample?: boolean | undefined;
+  sampleWarning?: string | undefined;
 }
 
 export class RegressionDetector {
@@ -47,6 +50,16 @@ export class RegressionDetector {
     };
 
     const regressions: DetectedRegression[] = [];
+
+    // 0. Sample Size Confidence Evaluation (N < 5 reports insufficient sample)
+    const sampleSize = Math.min(
+      typeof currentRun.caseCount === "number" ? currentRun.caseCount : (currentRun.results?.length ?? 0),
+      typeof baselineRun.caseCount === "number" ? baselineRun.caseCount : (baselineRun.results?.length ?? 0),
+    );
+    const insufficientSample = sampleSize > 0 && sampleSize < 5;
+    const sampleWarning = insufficientSample
+      ? `INSUFFICIENT_SAMPLE: Benchmark sample size (N=${sampleSize} < 5) lacks statistical significance.`
+      : undefined;
 
     // 1. Overall Score Regression Check
     if (baselineRun.overallScore > 0) {
@@ -125,14 +138,21 @@ export class RegressionDetector {
     }
 
     const hasRegressions = regressions.length > 0;
-    const summary = hasRegressions
+    let summary = hasRegressions
       ? `REGRESSION DETECTED: Found ${regressions.length} metric regression(s) relative to baseline run ${baselineRun.runId}.`
       : `NO REGRESSION: Current run ${currentRun.runId} matches or exceeds baseline run ${baselineRun.runId}.`;
+
+    if (insufficientSample) {
+      summary = `[INSUFFICIENT_SAMPLE: N=${sampleSize} < 5] ${summary}`;
+    }
 
     return {
       hasRegressions,
       regressions,
       summary,
+      sampleSize,
+      insufficientSample,
+      sampleWarning,
     };
   }
 }

@@ -21,10 +21,7 @@ export function useWorkspace(explicitProjectId?: string | null) {
     queryKey: [...WORKSPACE_KEY, targetId],
     queryFn: async () => {
       let validId = targetId;
-      if (
-        validId === "demo-sandbox-project" ||
-        (typeof window !== "undefined" && localStorage.getItem("hacksync:demo_auth") === "true")
-      ) {
+      if (validId === "demo-sandbox-project") {
         return DEMO_WORKSPACE;
       }
 
@@ -45,9 +42,6 @@ export function useWorkspace(explicitProjectId?: string | null) {
         } = await supabase.auth.getUser();
 
         if (!user) {
-          if (typeof window !== "undefined" && localStorage.getItem("hacksync:demo_auth") === "true") {
-            return DEMO_WORKSPACE;
-          }
           return null;
         }
 

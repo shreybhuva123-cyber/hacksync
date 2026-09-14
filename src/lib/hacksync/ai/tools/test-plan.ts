@@ -8,12 +8,17 @@ import type { ProjectKnowledgeGraph } from "../../intelligence/knowledge-graph";
 import { TestPlanner, type TestPlannerOptions } from "../../testing/test-planner";
 import type { TestPlan } from "../../testing/test-types";
 
+import { AuthorizationError } from "@/lib/errors";
+
 export class TestPlanTool {
   static execute(
     graph: ProjectKnowledgeGraph,
     params: TestPlannerOptions = {},
-    projectId = "default-project",
+    projectId: string,
   ): TestPlan {
+    if (!projectId || projectId === "default-project" || projectId.trim() === "") {
+      throw new AuthorizationError("[TestPlanTool] Authorized projectId is mandatory.");
+    }
     return TestPlanner.plan(graph, projectId, params);
   }
 }

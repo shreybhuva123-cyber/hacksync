@@ -8,6 +8,8 @@ import type { ProjectKnowledgeGraph } from "../../intelligence/knowledge-graph";
 import { PatchApplier, type ApplyPatchOptions } from "../../fixing/patch-applier";
 import type { Patch, PatchApplicationResult } from "../../fixing/fix-types";
 
+import { AuthorizationError, AuthenticationError } from "@/lib/errors";
+
 export interface ApplyPatchParams {
   approvalId: string;
   patch: Patch;
@@ -18,9 +20,16 @@ export class ApplyPatchTool {
   static async execute(
     graph: ProjectKnowledgeGraph,
     params: ApplyPatchParams,
-    projectId = "default-project",
-    userId = "system-user",
+    projectId: string,
+    userId: string,
   ): Promise<PatchApplicationResult> {
+    if (!projectId || projectId === "default-project" || projectId.trim() === "") {
+      throw new AuthorizationError("[ApplyPatchTool] Authorized projectId is mandatory.");
+    }
+    if (!userId || userId === "system-user" || userId.trim() === "") {
+      throw new AuthenticationError("[ApplyPatchTool] Authenticated userId is mandatory.");
+    }
+
     return PatchApplier.apply({
       projectId,
       userId: params.userId || userId,

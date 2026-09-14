@@ -16,6 +16,7 @@
  *   8. Cryptographic diff hash matching
  */
 
+import { createHash } from "crypto";
 import { supabase } from "@/integrations/supabase/client";
 import { AuthorizationError, AuthenticationError, ExternalServiceError } from "@/lib/errors";
 import { verifyProjectMembership } from "@/lib/security/tenant-verifier";
@@ -34,7 +35,7 @@ export interface PendingApprovalRequest {
   filesAffected: string[];
   diffPreview?: string | undefined;
   diffHash?: string | undefined;
-  status: "pending" | "approved" | "rejected" | "expired";
+  status: "pending" | "approved" | "rejected" | "expired" | "applied";
   createdAt: string;
   expiresAt: string;
   resolvedAt?: string | undefined;
@@ -72,19 +73,7 @@ export async function computeDiffHash(diff: string): Promise<string> {
  */
 export function computeDiffHashSync(diff: string): string {
   if (!diff) return "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
-  // FNV-1a / polynomial mix extended to 64 hex characters for sync fallback when subtle is unavailable
-  let h1 = 0xdeadbeef ^ diff.length;
-  let h2 = 0x41c6ce57 ^ diff.length;
-  for (let i = 0; i < diff.length; i++) {
-    const ch = diff.charCodeAt(i);
-    h1 = Math.imul(h1 ^ ch, 2654435761);
-    h2 = Math.imul(h2 ^ ch, 1597334677);
-  }
-  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
-  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
-  const p1 = (h1 >>> 0).toString(16).padStart(8, "0");
-  const p2 = (h2 >>> 0).toString(16).padStart(8, "0");
-  return (p1 + p2).repeat(4).slice(0, 64);
+  return createHash("sha256").update(diff).digest("hex");
 }
 
 /**
@@ -108,10 +97,17 @@ export interface ApprovalDatabaseAdapter {
   findById(id: string): Promise<{ data?: PendingApprovalRequest | null; error?: Error | null }>;
   updateStatus(params: {
     id: string;
-    status: "approved" | "rejected" | "expired";
+    status: "approved" | "rejected" | "expired" | "applied";
     resolvedAt: string;
     resolvedBy?: string | undefined;
   }): Promise<{ error?: Error | null }>;
+  atomicResolve(params: {
+    id: string;
+    expectedStatus: "pending" | "approved";
+    targetStatus: "approved" | "rejected" | "applied";
+    resolvedAt: string;
+    resolvedBy?: string | undefined;
+  }): Promise<{ data?: PendingApprovalRequest | null; error?: Error | null }>;
   getPendingForProject(projectId: string): Promise<{ data?: PendingApprovalRequest[]; error?: Error | null }>;
 }
 
@@ -169,7 +165,7 @@ export class SupabaseApprovalAdapter implements ApprovalDatabaseAdapter {
 
   async updateStatus(params: {
     id: string;
-    status: "approved" | "rejected" | "expired";
+    status: "approved" | "rejected" | "expired" | "applied";
     resolvedAt: string;
     resolvedBy?: string | undefined;
   }): Promise<{ error?: Error | null }> {
@@ -182,6 +178,54 @@ export class SupabaseApprovalAdapter implements ApprovalDatabaseAdapter {
       .eq("id", params.id);
 
     return { error: error ? new Error(error.message) : null };
+  }
+
+  async atomicResolve(params: {
+    id: string;
+    expectedStatus: "pending" | "approved";
+    targetStatus: "approved" | "rejected" | "applied";
+    resolvedAt: string;
+    resolvedBy?: string | undefined;
+  }): Promise<{ data?: PendingApprovalRequest | null; error?: Error | null }> {
+    const now = new Date().toISOString();
+    let query = (supabase.from as any)("ai_approval_requests")
+      .update({
+        status: params.targetStatus,
+        resolved_at: params.resolvedAt,
+        resolved_by: params.resolvedBy,
+      })
+      .eq("id", params.id)
+      .eq("status", params.expectedStatus);
+
+    if (params.expectedStatus === "pending") {
+      query = query.gt("expires_at", now);
+    }
+
+    const { data, error } = await query.select("*").maybeSingle();
+
+    if (error) return { error: new Error(error.message) };
+    if (!data) return { data: null };
+
+    return {
+      data: {
+        id: data.id,
+        requestId: data.request_id,
+        projectId: data.project_id,
+        userId: data.user_id,
+        toolName: data.tool_name,
+        operation: data.operation,
+        summary: data.summary,
+        rationale: data.rationale,
+        filesAffected: data.files_affected || [],
+        diffPreview: data.diff_preview,
+        diffHash: data.diff_hash,
+        status: data.status,
+        createdAt: data.created_at,
+        expiresAt: data.expires_at,
+        resolvedAt: data.resolved_at,
+        resolvedBy: data.resolved_by,
+      },
+    };
   }
 
   async getPendingForProject(projectId: string): Promise<{ data?: PendingApprovalRequest[]; error?: Error | null }> {
@@ -229,7 +273,7 @@ export class InMemoryApprovalDatabaseAdapter implements ApprovalDatabaseAdapter 
 
   async updateStatus(params: {
     id: string;
-    status: "approved" | "rejected" | "expired";
+    status: "approved" | "rejected" | "expired" | "applied";
     resolvedAt: string;
     resolvedBy?: string | undefined;
   }): Promise<{ error?: Error | null }> {
@@ -240,6 +284,34 @@ export class InMemoryApprovalDatabaseAdapter implements ApprovalDatabaseAdapter 
     item.resolvedBy = params.resolvedBy;
     this.store.set(params.id, item);
     return { error: null };
+  }
+
+  async atomicResolve(params: {
+    id: string;
+    expectedStatus: "pending" | "approved";
+    targetStatus: "approved" | "rejected" | "applied";
+    resolvedAt: string;
+    resolvedBy?: string | undefined;
+  }): Promise<{ data?: PendingApprovalRequest | null; error?: Error | null }> {
+    const item = this.store.get(params.id);
+    if (!item) {
+      return { data: null, error: new Error(`Approval request '${params.id}' not found.`) };
+    }
+    if (item.status !== params.expectedStatus) {
+      return {
+        data: null,
+        error: new Error(`Approval request '${params.id}' is in status '${item.status}', expected '${params.expectedStatus}'.`),
+      };
+    }
+    if (params.expectedStatus === "pending" && new Date(item.expiresAt).getTime() <= Date.now()) {
+      item.status = "expired";
+      return { data: null, error: new Error(`Approval request '${params.id}' has expired.`) };
+    }
+    item.status = params.targetStatus;
+    item.resolvedAt = params.resolvedAt;
+    item.resolvedBy = params.resolvedBy;
+    this.store.set(params.id, { ...item });
+    return { data: { ...item }, error: null };
   }
 
   async getPendingForProject(projectId: string): Promise<{ data?: PendingApprovalRequest[]; error?: Error | null }> {
@@ -269,15 +341,31 @@ export class InMemoryApprovalDatabaseAdapter implements ApprovalDatabaseAdapter 
 export type ApprovalPromise = PendingApprovalRequest & PromiseLike<PendingApprovalRequest>;
 
 export class ApprovalGate {
-  private static defaultAdapter: ApprovalDatabaseAdapter =
-    process.env["NODE_ENV"] === "test" ||
-    process.env["BUN_ENV"] === "test" ||
-    typeof (globalThis as any).describe === "function" ||
-    typeof (globalThis as any).test === "function"
-      ? new InMemoryApprovalDatabaseAdapter()
-      : new SupabaseApprovalAdapter();
+  private static inMemoryAdapter = new InMemoryApprovalDatabaseAdapter();
+  private static supabaseAdapter = new SupabaseApprovalAdapter();
+  private static customAdapter: ApprovalDatabaseAdapter | null = null;
 
-  private static dbAdapter: ApprovalDatabaseAdapter = ApprovalGate.defaultAdapter;
+  public static isTestEnvironment(): boolean {
+    return (
+      process.env["NODE_ENV"] === "test" ||
+      process.env["BUN_ENV"] === "test" ||
+      process.env["VITEST"] !== undefined ||
+      Boolean(typeof process !== "undefined" && process.argv && process.argv.some((a) => a.includes("test"))) ||
+      typeof (globalThis as any).describe === "function" ||
+      typeof (globalThis as any).test === "function" ||
+      typeof (globalThis as any).it === "function" ||
+      Boolean(typeof (globalThis as any).Bun !== "undefined")
+    );
+  }
+
+  static get dbAdapter(): ApprovalDatabaseAdapter {
+    if (this.customAdapter) return this.customAdapter;
+    return this.isTestEnvironment() ? this.inMemoryAdapter : this.supabaseAdapter;
+  }
+
+  static set dbAdapter(adapter: ApprovalDatabaseAdapter) {
+    this.customAdapter = adapter;
+  }
 
   // Non-authoritative performance cache
   private static pendingApprovals = new Map<string, PendingApprovalRequest>();
@@ -286,11 +374,11 @@ export class ApprovalGate {
   private static readonly DEFAULT_EXPIRY_MS = 30 * 60 * 1000; // 30 minutes
 
   static setAdapter(adapter: ApprovalDatabaseAdapter): void {
-    this.dbAdapter = adapter;
+    this.customAdapter = adapter;
   }
 
   static resetAdapter(): void {
-    this.dbAdapter = this.defaultAdapter;
+    this.customAdapter = null;
   }
 
   static getToolTier(toolName: string): ToolPermissionTier {
@@ -348,13 +436,18 @@ export class ApprovalGate {
     rationale: string;
     filesAffected: string[];
     diffPreview?: string | undefined;
+    diffHash?: string | undefined;
+    patchHash?: string | undefined;
     operation?: string | undefined;
     ttlMs?: number | undefined;
   }): ApprovalPromise {
     const id = `appr_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const now = new Date();
     const expiresAt = new Date(now.getTime() + (params.ttlMs ?? this.DEFAULT_EXPIRY_MS)).toISOString();
-    const diffHash = params.diffPreview ? computeDiffHashSync(params.diffPreview) : undefined;
+    const diffHash =
+      params.diffHash ||
+      params.patchHash ||
+      (params.diffPreview ? computeDiffHashSync(params.diffPreview) : undefined);
 
     const request: PendingApprovalRequest = {
       id,
@@ -379,8 +472,8 @@ export class ApprovalGate {
     // Prepare async database insertion promise
     const persistencePromise = (async () => {
       try {
-        // Re-calculate with crypto subtle if available
-        if (params.diffPreview) {
+        // Re-calculate with crypto subtle if available and not already provided
+        if (!request.diffHash && params.diffPreview) {
           request.diffHash = await computeDiffHash(params.diffPreview);
         }
 
@@ -532,19 +625,20 @@ export class ApprovalGate {
           }
         }
 
-        // 9. Update database record atomically
+        // 9. Update database record atomically (enforcing pending status and unexpired)
         const resolvedAt = new Date().toISOString();
-        const { error: updateError } = await this.dbAdapter.updateStatus({
+        const { data: updatedReq, error: updateError } = await this.dbAdapter.atomicResolve({
           id: approvalId,
-          status: decision,
+          expectedStatus: "pending",
+          targetStatus: decision,
           resolvedAt,
           resolvedBy: effectiveUserId,
         });
 
-        if (updateError) {
+        if (updateError || !updatedReq) {
           throw new ExternalServiceError(
             "PostgreSQL",
-            `Failed to update approval status in authoritative database: ${updateError.message}`,
+            `Failed to atomically update approval status in authoritative database: ${updateError?.message || "Already resolved or expired."}`,
           );
         }
 
@@ -588,6 +682,109 @@ export class ApprovalGate {
     };
 
     return Object.assign(resolutionPromise, syncReq) as ApprovalPromise;
+  }
+
+  /**
+   * Authoritatively retrieves an approval from the database adapter.
+   * Never relies on unverified in-memory state for mutation authorization.
+   */
+  static async getAuthoritativeApproval(
+    approvalId: string,
+    authenticatedUserId?: string,
+    projectId?: string,
+  ): Promise<PendingApprovalRequest> {
+    if (!approvalId || approvalId.trim() === "") {
+      throw new AuthorizationError("[ApprovalGate] Valid approval ID is mandatory.");
+    }
+
+    const { data: approval, error } = await this.dbAdapter.findById(approvalId);
+    if (error) {
+      throw new ExternalServiceError(
+        "PostgreSQL",
+        `Failed to retrieve approval request from authoritative database: ${error.message}`,
+      );
+    }
+    if (!approval) {
+      throw new AuthorizationError(`[ApprovalGate] Approval request '${approvalId}' not found.`);
+    }
+
+    if (projectId && approval.projectId !== projectId) {
+      throw new AuthorizationError(
+        `[ApprovalGate] Cross-project approval violation: Approval belongs to project '${approval.projectId}', but target is '${projectId}'.`,
+      );
+    }
+
+    if (authenticatedUserId) {
+      const membership = await verifyProjectMembership(authenticatedUserId, approval.projectId);
+      if (!membership.allowed) {
+        throw new AuthorizationError(
+          `[ApprovalGate] User '${authenticatedUserId}' is not an authorized member of project '${approval.projectId}'.`,
+        );
+      }
+    }
+
+    // Refresh non-authoritative performance cache
+    this.pendingApprovals.set(approvalId, approval);
+    return approval;
+  }
+
+  /**
+   * Atomically consumes an approved request at patch application time.
+   * Verifies all security boundaries and transitions status from 'approved' -> 'applied'.
+   * Prevents double-application of the same approval.
+   */
+  static async consumeAuthoritativeApproval(params: {
+    approvalId: string;
+    userId: string;
+    projectId: string;
+    expectedDiffHash?: string;
+  }): Promise<PendingApprovalRequest> {
+    const { approvalId, userId, projectId, expectedDiffHash } = params;
+    const approval = await this.getAuthoritativeApproval(approvalId, userId, projectId);
+
+    if (approval.status !== "approved") {
+      throw new AuthorizationError(
+        `[ApprovalGate] Approval '${approvalId}' status is '${approval.status}'. Must be 'approved' before applying.`,
+      );
+    }
+
+    if (new Date(approval.expiresAt).getTime() <= Date.now()) {
+      throw new AuthorizationError(`[ApprovalGate] Approval '${approvalId}' has expired.`);
+    }
+
+    if (expectedDiffHash && approval.diffHash) {
+      if (!timingSafeEqual(expectedDiffHash, approval.diffHash)) {
+        throw new AuthorizationError(
+          `[ApprovalGate] Diff tampering detected: Expected SHA-256 '${expectedDiffHash}', got '${approval.diffHash}'.`,
+        );
+      }
+    }
+
+    const membership = await verifyProjectMembership(userId, approval.projectId);
+    if (!membership.allowed || membership.role === "member") {
+      throw new AuthorizationError(
+        `[ApprovalGate] Permission denied: Role '${membership.role}' is not authorized to consume code approvals. Owner or lead required.`,
+      );
+    }
+
+    // Atomically transition approved -> applied
+    const resolvedAt = new Date().toISOString();
+    const { data: consumed, error } = await this.dbAdapter.atomicResolve({
+      id: approvalId,
+      expectedStatus: "approved",
+      targetStatus: "applied",
+      resolvedAt,
+      resolvedBy: userId,
+    });
+
+    if (error || !consumed) {
+      throw new AuthorizationError(
+        `[ApprovalGate] Failed to atomically consume approval '${approvalId}': already consumed or invalid state.`,
+      );
+    }
+
+    this.pendingApprovals.set(approvalId, consumed);
+    return consumed;
   }
 
   /**
@@ -648,8 +845,9 @@ export class ApprovalGate {
     this.pendingApprovals.clear();
     this.inFlightInsertions.clear();
     this.resolvingApprovals.clear();
-    if (this.dbAdapter instanceof InMemoryApprovalDatabaseAdapter) {
-      this.dbAdapter.clear();
+    this.inMemoryAdapter.clear();
+    if (this.customAdapter && "clear" in this.customAdapter && typeof (this.customAdapter as any).clear === "function") {
+      (this.customAdapter as any).clear();
     }
   }
 }

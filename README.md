@@ -3,7 +3,7 @@
 [![Build & Validation](https://img.shields.io/badge/Validation-Passing-emerald)](scripts/validate.ts)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0_Strict-blue)](https://www.typescriptlang.org/)
 [![Database](https://img.shields.io/badge/PostgreSQL-Row_Level_Security-emerald)](https://supabase.com/)
-[![Test Suite](https://img.shields.io/badge/Tests-484_Passing-success)](#-automated-validation-suite)
+[![Test Suite](https://img.shields.io/badge/Tests-521_Passing-success)](#-automated-validation-suite)
 [![Security Policy](https://img.shields.io/badge/Security-Strict_Read--Only-purple)](SECURITY.md)
 
 > **Real Codebase Intelligence. Evidence-First Security. Human-Approved Fixes.**

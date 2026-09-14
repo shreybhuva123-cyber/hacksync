@@ -27,7 +27,7 @@ import {
   History,
 } from "lucide-react";
 import { CopyButton, RoleBadge, StatusPill } from "@/components/hacksync/primitives";
-import { codeSyncService, type CodeSyncPreviewResult } from "@/lib/services/codesync.service";
+import { codeSyncService, CodeSyncStateMachine, type CodeSyncPreviewResult } from "@/lib/services/codesync.service";
 import { computeLineDiff } from "@/lib/hacksync/merge-engine";
 import type {
   Workspace,
@@ -36,6 +36,7 @@ import type {
   CodeSyncConflict,
   Role,
   Area,
+  CodeSyncState,
   ConflictResolution,
   SyncSession,
 } from "@/lib/hacksync/types";
@@ -63,6 +64,21 @@ export function CodeSyncModal({
   const [syncSuccess, setSyncSuccess] = useState(false);
   const [completedSession, setCompletedSession] = useState<SyncSession | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Track authoritative state machine state
+  const [syncState, setSyncState] = useState<CodeSyncState>(() =>
+    CodeSyncStateMachine.getState(workspace?.project?.id || "")
+  );
+
+  // Poll state machine state every 500ms during active operations
+  useEffect(() => {
+    if (!isOpen || !workspace?.project?.id) return;
+    setSyncState(CodeSyncStateMachine.getState(workspace.project.id));
+    const interval = setInterval(() => {
+      setSyncState(CodeSyncStateMachine.getState(workspace.project.id));
+    }, 500);
+    return () => clearInterval(interval);
+  }, [isOpen, workspace?.project?.id, isExecuting, syncSuccess]);
 
   // Conflict resolutions state: map of path -> resolution
   const [resolutions, setResolutions] = useState<Record<string, ConflictResolution>>({});
@@ -219,7 +235,7 @@ export function CodeSyncModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm animate-in fade-in">
-      <div className="relative flex max-h-[92vh] w-full max-w-5xl flex-col rounded-2xl border border-border bg-card shadow-2xl overflow-hidden">
+      <div className="relative flex max-h-[92vh] w-full max-w-[95vw] lg:max-w-7xl flex-col rounded-2xl border border-border bg-card shadow-2xl overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border p-5 bg-muted/20">
           <div className="flex items-center gap-3">
@@ -231,6 +247,17 @@ export function CodeSyncModal({
                 <span>CodeSync — Git-like 3-Way Merge Engine</span>
                 <span className="mono rounded bg-primary/20 px-2 py-0.5 text-[10px] font-bold text-primary">
                   {workspace.project.name}
+                </span>
+                <span className={`ml-2 px-2 py-0.5 rounded-full text-xs font-medium ${
+                  syncState === "SYNCED" ? "bg-green-500/20 text-green-400" :
+                  syncState === "SYNCING" ? "bg-blue-500/20 text-blue-400 animate-pulse" :
+                  syncState === "PENDING_SYNC" ? "bg-yellow-500/20 text-yellow-400" :
+                  syncState === "SYNC_FAILED" ? "bg-red-500/20 text-red-400" :
+                  syncState === "CONFLICT" ? "bg-orange-500/20 text-orange-400" :
+                  syncState === "RESOLVED" ? "bg-purple-500/20 text-purple-400" :
+                  "bg-zinc-500/20 text-zinc-400"
+                }`}>
+                  {syncState.replace(/_/g, " ")}
                 </span>
               </h3>
               <p className="text-xs text-muted-foreground">
@@ -525,7 +552,7 @@ export function CodeSyncModal({
                               </div>
 
                               {diffViewMode === "side_by_side" ? (
-                                <div className="grid gap-2.5 grid-cols-1 md:grid-cols-3">
+                                <div className="grid gap-2.5 grid-cols-1 lg:grid-cols-3">
                                   {/* Column 1: BASE VERSION */}
                                   <div className="rounded-lg border border-border bg-card p-2.5 space-y-1">
                                     <div className="flex items-center justify-between text-[11px] font-bold pb-1 border-b border-border">

@@ -8,12 +8,17 @@ import type { ProjectKnowledgeGraph } from "../../intelligence/knowledge-graph";
 import { TestGenerator, type GenerateTestOptions } from "../../testing/test-generator";
 import type { GeneratedTestProposal } from "../../testing/test-types";
 
+import { AuthorizationError } from "@/lib/errors";
+
 export class GenerateTestsTool {
   static execute(
     graph: ProjectKnowledgeGraph,
     params: Partial<GenerateTestOptions> = {},
-    projectId = "default-project",
+    projectId: string,
   ): GeneratedTestProposal {
+    if (!projectId || projectId === "default-project" || projectId.trim() === "") {
+      throw new AuthorizationError("[GenerateTestsTool] Authorized projectId is mandatory.");
+    }
     const targetFile = params.targetFile || graph.getAllFilePaths()[0] || "src/index.ts";
     const existingContent = graph.getFileContent(targetFile) || "";
 

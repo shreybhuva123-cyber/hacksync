@@ -9,6 +9,8 @@ import { FixVerificationEngine, type VerifyFixOptions } from "../../fixing/fix-v
 import type { Patch, VerificationResult, FixProposal, FixIterationState } from "../../fixing/fix-types";
 import type { SecurityFinding } from "../../security/finding-types";
 
+import { AuthorizationError, AuthenticationError } from "@/lib/errors";
+
 export interface VerifyFixParams {
   patch: Patch;
   approvalId: string;
@@ -22,13 +24,19 @@ export class VerifyFixTool {
   static async execute(
     graph: ProjectKnowledgeGraph,
     params: VerifyFixParams,
-    projectId = "default-project",
-    userId = "system-user",
+    projectId: string,
+    userId: string,
   ): Promise<{
     verification: VerificationResult;
     nextProposal?: FixProposal | undefined;
     iterationState: FixIterationState;
   }> {
+    if (!projectId || projectId === "default-project" || projectId.trim() === "") {
+      throw new AuthorizationError("[VerifyFixTool] Authorized projectId is mandatory.");
+    }
+    if (!userId || userId === "system-user" || userId.trim() === "") {
+      throw new AuthenticationError("[VerifyFixTool] Authenticated userId is mandatory.");
+    }
     return FixVerificationEngine.verify({
       projectId,
       userId,

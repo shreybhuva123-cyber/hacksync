@@ -11,12 +11,17 @@ import { SecurityHealthCalculator } from "../../security/security-health";
 import { DependencyVulnerabilityScanner } from "../../security/dependency-vulnerability-scanner";
 import type { SecurityHealthBreakdown } from "../../security/finding-types";
 
+import { AuthorizationError } from "@/lib/errors";
+
 export class SecurityHealthTool {
   static execute(
     graph: ProjectKnowledgeGraph,
-    projectId = "default-project",
+    projectId: string,
     ws?: Workspace | null,
   ): SecurityHealthBreakdown {
+    if (!projectId || projectId === "default-project" || projectId.trim() === "") {
+      throw new AuthorizationError("[SecurityHealthTool] Authorized projectId is mandatory.");
+    }
     const report = StaticAuditor.runPassiveAudit({ graph, projectId, ws });
 
     const pkgContent = graph.getFileContent("package.json");
