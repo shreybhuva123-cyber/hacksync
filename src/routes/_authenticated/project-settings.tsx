@@ -5,10 +5,13 @@ import {
   Bot,
   Building2,
   Check,
+  CheckCircle2,
   ChevronRight,
+  Clock,
   Copy,
   Folder,
   HardDrive,
+  Inbox,
   KeyRound,
   Laptop,
   Layers,
@@ -30,6 +33,9 @@ import {
   X,
   Zap,
 } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { WORKSPACE_KEY } from "@/lib/hacksync/workspace.queries";
+import { joinRequestsService } from "@/lib/services/join-requests.service";
 import { WorkspaceView } from "@/components/hacksync/WorkspaceView";
 import {
   CopyButton,
@@ -65,7 +71,7 @@ import {
   setActiveDirectoryHandle,
   type LocalDirectoryState,
 } from "@/lib/hacksync/local-filesystem";
-import type { Workspace, Project } from "@/lib/hacksync/types";
+import type { Workspace, Project, JoinRequest } from "@/lib/hacksync/types";
 
 export const Route = createFileRoute("/_authenticated/project-settings")({
   head: () => ({
@@ -263,6 +269,138 @@ function ProjectSettingsBody({ ws }: { ws: Workspace }) {
         type: "error",
         text: err instanceof Error ? err.message : "Failed to remove member.",
       });
+    }
+  };
+
+  // Join Requests State & Review
+  const queryClient = useQueryClient();
+  const [joinRequests, setJoinRequests] = useState<JoinRequest[]>(ws.joinRequests || []);
+  const [isLoadingRequests, setIsLoadingRequests] = useState(false);
+  const [reviewingRequestId, setReviewingRequestId] = useState<string | null>(null);
+  const [assignedRoles, setAssignedRoles] = useState<Record<string, Role>>({});
+
+  useEffect(() => {
+    let active = true;
+    setIsLoadingRequests(true);
+    joinRequestsService
+      .getProjectJoinRequests(ws.project.id)
+      .then((data) => {
+        if (active) {
+          setJoinRequests(data);
+          const initial: Record<string, Role> = {};
+          for (const req of data) initial[req.id] = req.requested_role;
+          setAssignedRoles((prev) => ({ ...initial, ...prev }));
+        }
+      })
+      .catch((err) => console.warn("Failed to load join requests:", err))
+      .finally(() => {
+        if (active) setIsLoadingRequests(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [ws.project.id]);
+
+  const pendingRequests = joinRequests.filter((r) => r.status === "pending");
+
+  const handleReviewRequest = async (requestId: string, action: "accepted" | "rejected") => {
+    try {
+      setReviewingRequestId(requestId);
+      const assignedRole = assignedRoles[requestId] || "frontend";
+
+      const reviewPayload: {
+        requestId: string;
+        projectId: string;
+        action: "accepted" | "rejected";
+        assignedRole?: Role | undefined;
+        callerRole: string;
+        callerUserId?: string | undefined;
+      } = {
+        requestId,
+        projectId: ws.project.id,
+        action,
+        callerRole,
+      };
+      if (action === "accepted") {
+        reviewPayload.assignedRole = assignedRole;
+      }
+      if (user?.id) {
+        reviewPayload.callerUserId = user.id;
+      }
+
+      await joinRequestsService.reviewJoinRequest(reviewPayload);
+
+      setJoinRequests((prev) =>
+        prev.map((r) =>
+          r.id === requestId
+            ? { ...r, status: action, assigned_role: action === "accepted" ? assignedRole : null }
+            : r,
+        ),
+      );
+
+      const target = joinRequests.find((r) => r.id === requestId);
+      setTeamFeedback({
+        type: "success",
+        text:
+          action === "accepted"
+            ? `Accepted ${target?.display_name || "applicant"} as ${ROLE_CONFIG[assignedRole].label}!`
+            : `Declined request from ${target?.display_name || "applicant"}.`,
+      });
+
+      void queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY, exact: false });
+      setTimeout(() => setTeamFeedback(null), 3500);
+    } catch (err) {
+      setTeamFeedback({
+        type: "error",
+        text: err instanceof Error ? err.message : "Failed to review join request.",
+      });
+    } finally {
+      setReviewingRequestId(null);
+    }
+  };
+
+  // Direct Add Teammate State
+  const [directAddIdentifier, setDirectAddIdentifier] = useState("");
+  const [directAddRole, setDirectAddRole] = useState<Role>("frontend");
+  const [isDirectAdding, setIsDirectAdding] = useState(false);
+  const [directAddFeedback, setDirectAddFeedback] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
+
+  const handleDirectAddMember = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const clean = directAddIdentifier.trim();
+    if (!clean) {
+      setDirectAddFeedback({ type: "error", text: "Please enter a username or email address." });
+      return;
+    }
+
+    try {
+      setIsDirectAdding(true);
+      setDirectAddFeedback(null);
+      const res = await joinRequestsService.addMemberByIdentifier({
+        projectId: ws.project.id,
+        identifier: clean,
+        role: directAddRole,
+        callerRole,
+      });
+
+      setDirectAddFeedback({
+        type: "success",
+        text: `Successfully added ${res.displayName} to team as ${ROLE_CONFIG[res.role].label}!`,
+      });
+      setDirectAddIdentifier("");
+      setDirectAddRole("frontend");
+      void queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY, exact: false });
+      setTimeout(() => setDirectAddFeedback(null), 4000);
+    } catch (err) {
+      setDirectAddFeedback({
+        type: "error",
+        text: err instanceof Error ? err.message : "Failed to add teammate.",
+      });
+    } finally {
+      setIsDirectAdding(false);
     }
   };
 
@@ -536,7 +674,12 @@ function ProjectSettingsBody({ ws }: { ws: Workspace }) {
               }`}
             >
               <Users className="size-3.5" />
-              Team & Invites ({ws.members.length})
+              <span>Team & Invites ({ws.members.length})</span>
+              {pendingRequests.length > 0 && (
+                <span className="rounded-full bg-destructive text-destructive-foreground px-1.5 py-0.2 text-[10px] font-bold">
+                  {pendingRequests.length}
+                </span>
+              )}
             </button>
 
             <button
@@ -781,6 +924,212 @@ function ProjectSettingsBody({ ws }: { ws: Workspace }) {
                 </div>
               </div>
             </div>
+
+            {/* 📥 SECTION A: Pending Join Requests (Leader Review & Role Assignment) */}
+            {isLead && (
+              <Panel className="p-5 space-y-4 border-primary/30 shadow-sm">
+                <PanelHeader
+                  title="Pending Join Requests"
+                  icon={<Clock className="size-4 text-primary" />}
+                  actions={
+                    <StatusPill tone={pendingRequests.length > 0 ? "warning" : "neutral"}>
+                      {pendingRequests.length} pending
+                    </StatusPill>
+                  }
+                />
+
+                {isLoadingRequests ? (
+                  <div className="flex items-center justify-center py-6 text-xs text-muted-foreground gap-2">
+                    <Loader2 className="size-4 animate-spin" />
+                    <span>Checking for join requests...</span>
+                  </div>
+                ) : pendingRequests.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-border/80 p-6 text-center space-y-1.5 bg-muted/10">
+                    <div className="mx-auto flex size-8 items-center justify-center rounded-full bg-secondary text-muted-foreground">
+                      <Inbox className="size-4" />
+                    </div>
+                    <p className="text-xs font-semibold text-foreground">No Pending Join Requests</p>
+                    <p className="text-[11px] text-muted-foreground max-w-md mx-auto">
+                      Teammates who enter your project invite code will appear here. You can assign their official role and accept or decline their request.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {pendingRequests.map((req) => {
+                      const isReviewing = reviewingRequestId === req.id;
+                      const assignedRole = assignedRoles[req.id] || req.requested_role;
+
+                      return (
+                        <div
+                          key={req.id}
+                          className="rounded-xl border border-border bg-card p-4 space-y-3 shadow-sm hover:border-primary/40 transition-colors"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex items-center gap-3">
+                              <div className="flex size-8 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-xs">
+                                {req.display_name.charAt(0).toUpperCase()}
+                              </div>
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs font-bold text-foreground">
+                                    {req.display_name}
+                                  </span>
+                                  <span className="text-[10px] text-muted-foreground flex items-center gap-1">
+                                    <span>requested</span>
+                                    <RoleBadge role={req.requested_role} />
+                                  </span>
+                                </div>
+                                <p className="text-[11px] text-muted-foreground">
+                                  {req.email || "No email provided"} •{" "}
+                                  {new Date(req.created_at).toLocaleDateString()}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Leader Role Assignment & Review Actions */}
+                          <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-border">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[11px] font-semibold text-foreground">
+                                Assign Role:
+                              </span>
+                              <div className="flex items-center gap-1">
+                                {ROLES.map((r) => (
+                                  <button
+                                    key={r}
+                                    type="button"
+                                    onClick={() =>
+                                      setAssignedRoles((prev) => ({ ...prev, [req.id]: r }))
+                                    }
+                                    className={`rounded px-2 py-0.5 text-[10px] font-semibold capitalize transition-colors ${
+                                      assignedRole === r
+                                        ? "bg-primary text-primary-foreground font-bold shadow-sm"
+                                        : "bg-secondary hover:bg-accent text-muted-foreground"
+                                    }`}
+                                  >
+                                    {ROLE_CONFIG[r].label}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => void handleReviewRequest(req.id, "rejected")}
+                                disabled={isReviewing}
+                                className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-1.5 text-xs font-semibold text-destructive hover:bg-destructive/20 transition-colors disabled:opacity-50"
+                              >
+                                Decline
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void handleReviewRequest(req.id, "accepted")}
+                                disabled={isReviewing}
+                                className="flex items-center gap-1.5 rounded-lg bg-primary px-3.5 py-1.5 text-xs font-semibold text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50"
+                              >
+                                {isReviewing ? (
+                                  <Loader2 className="size-3 animate-spin" />
+                                ) : (
+                                  <UserCheck className="size-3.5" />
+                                )}
+                                <span>Accept as {ROLE_CONFIG[assignedRole].label}</span>
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </Panel>
+            )}
+
+            {/* ➕ SECTION B: Direct Add Teammate by Username or Email with Role */}
+            {isLead && (
+              <Panel className="p-5 space-y-4">
+                <PanelHeader
+                  title="Directly Add Teammate"
+                  icon={<UserPlus className="size-4" />}
+                />
+
+                <p className="text-xs text-muted-foreground">
+                  Quickly add a team member by entering their username or email address and specifying their role.
+                </p>
+
+                {directAddFeedback && (
+                  <div
+                    className={`flex items-center gap-2 rounded-lg p-3 text-xs font-medium ${
+                      directAddFeedback.type === "success"
+                        ? "bg-success/15 text-success border border-success/30"
+                        : "bg-destructive/15 text-destructive border border-destructive/30"
+                    }`}
+                  >
+                    {directAddFeedback.type === "success" ? (
+                      <CheckCircle2 className="size-4 shrink-0" />
+                    ) : (
+                      <AlertCircle className="size-4 shrink-0" />
+                    )}
+                    <span>{directAddFeedback.text}</span>
+                  </div>
+                )}
+
+                <form onSubmit={handleDirectAddMember} className="space-y-4">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-1">
+                      <label className="block text-xs font-semibold text-foreground">
+                        Username or Email Address <span className="text-destructive">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={directAddIdentifier}
+                        onChange={(e) => setDirectAddIdentifier(e.target.value)}
+                        placeholder="e.g. alexdev or alex@team.dev"
+                        className="w-full rounded-lg border border-input bg-background px-3 py-2 text-xs outline-none focus:border-primary"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="block text-xs font-semibold text-foreground">
+                        Assigned Role
+                      </label>
+                      <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                        {ROLES.map((r) => (
+                          <button
+                            key={r}
+                            type="button"
+                            onClick={() => setDirectAddRole(r)}
+                            className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold capitalize transition-all ${
+                              directAddRole === r
+                                ? "bg-primary text-primary-foreground font-bold shadow-sm"
+                                : "border border-border bg-background hover:bg-accent text-muted-foreground"
+                            }`}
+                          >
+                            {ROLE_CONFIG[r].label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end pt-1">
+                    <button
+                      type="submit"
+                      disabled={isDirectAdding}
+                      className="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50 transition-opacity"
+                    >
+                      {isDirectAdding ? (
+                        <Loader2 className="size-3.5 animate-spin" />
+                      ) : (
+                        <Plus className="size-3.5" />
+                      )}
+                      <span>Add Teammate as {ROLE_CONFIG[directAddRole].label}</span>
+                    </button>
+                  </div>
+                </form>
+              </Panel>
+            )}
 
             {/* Team Roster Panel */}
             <Panel className="p-5 space-y-4">

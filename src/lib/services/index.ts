@@ -4,3 +4,4 @@ export * from "./contracts.service";
 export * from "./schema.service";
 export * from "./members.service";
 export * from "./security.service";
+export * from "./join-requests.service";

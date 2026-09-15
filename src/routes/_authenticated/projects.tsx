@@ -15,6 +15,7 @@ import {
 import { CreateProjectModal } from "@/components/projects/CreateProjectModal";
 import { JoinProjectModal } from "@/components/projects/JoinProjectModal";
 import { ProjectListGrid } from "@/components/projects/ProjectListGrid";
+import { joinRequestsService } from "@/lib/services/join-requests.service";
 import type { Role } from "@/lib/hacksync/types";
 
 export const Route = createFileRoute("/_authenticated/projects")({
@@ -105,17 +106,26 @@ function ProjectsBody() {
 
   const handleJoin = async (input: { inviteCode: string; role: Role }) => {
     try {
-      const project = await joinProject.mutateAsync({
+      const res = await joinRequestsService.requestToJoin({
         inviteCode: input.inviteCode,
+        requestedRole: input.role,
         displayName: user?.email ? (user.email.split("@")[0] || "You") : "You",
-        role: input.role,
-        userId: user?.id ?? "local-user",
+        email: user?.email ?? undefined,
+        userId: user?.id ?? undefined,
       });
 
-      setActiveProjectId(project.id);
-      navigate({ to: "/dashboard" });
+      if (res.status === "already_member") {
+        setActiveProjectId(res.projectId);
+        navigate({ to: "/dashboard" });
+        toast.success(`Entering ${res.projectName}...`);
+        return { status: "already_member", message: res.message };
+      } else {
+        toast.info(res.message);
+        return { status: "pending", message: res.message };
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to join project");
+      throw error;
     }
   };
 

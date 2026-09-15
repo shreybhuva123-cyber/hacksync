@@ -7,6 +7,7 @@ import {
   contractsService,
   schemaService,
   membersService,
+  joinRequestsService,
 } from "@/lib/services";
 import { WORKSPACE_KEY, USER_PROJECTS_KEY } from "./workspace.queries";
 import type { CreateProjectInput, JoinProjectInput } from "@/lib/validation/schemas";
@@ -36,6 +37,40 @@ export function useJoinProject() {
     onSuccess: (project) => {
       setActiveProjectId(project.id);
       queryClient.invalidateQueries({ queryKey: USER_PROJECTS_KEY });
+      queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY, exact: false });
+    },
+  });
+}
+
+export function useRequestToJoinProject() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: joinRequestsService.requestToJoin,
+    onSuccess: (res) => {
+      if (res.status === "already_member") {
+        setActiveProjectId(res.projectId);
+        queryClient.invalidateQueries({ queryKey: USER_PROJECTS_KEY });
+        queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY, exact: false });
+      }
+    },
+  });
+}
+
+export function useReviewJoinRequest() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: joinRequestsService.reviewJoinRequest,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY, exact: false });
+    },
+  });
+}
+
+export function useAddMemberByIdentifier() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: joinRequestsService.addMemberByIdentifier,
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY, exact: false });
     },
   });

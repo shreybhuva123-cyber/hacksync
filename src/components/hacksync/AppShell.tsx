@@ -47,6 +47,7 @@ import { AiCopilotModal } from "./AiCopilotModal";
 import { CommandPalette } from "./CommandPalette";
 import { InviteTeammatesModal } from "@/components/projects/InviteTeammatesModal";
 import { JoinProjectModal } from "@/components/projects/JoinProjectModal";
+import { joinRequestsService } from "@/lib/services/join-requests.service";
 import { TopTimerWidget } from "@/components/timer";
 import { useTheme } from "@/components/ThemeProvider";
 
@@ -77,15 +78,24 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const handleJoinProject = async (input: { inviteCode: string; role: Role }) => {
     try {
-      const project = await joinProject.mutateAsync({
+      const res = await joinRequestsService.requestToJoin({
         inviteCode: input.inviteCode,
+        requestedRole: input.role,
         displayName: user?.email ? (user.email.split("@")[0] || "You") : "You",
-        role: input.role,
-        userId: user?.id ?? "local-user",
+        email: user?.email ?? undefined,
+        userId: user?.id ?? undefined,
       });
-      setActiveProjectId(project.id);
-      setJoinOpen(false);
-      void navigate({ to: "/dashboard" });
+
+      if (res.status === "already_member") {
+        setActiveProjectId(res.projectId);
+        setJoinOpen(false);
+        void navigate({ to: "/dashboard" });
+        toast.success(`Entering ${res.projectName}...`);
+        return { status: "already_member", message: res.message };
+      } else {
+        toast.info(res.message);
+        return { status: "pending", message: res.message };
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to join project");
       throw error;

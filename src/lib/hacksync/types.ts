@@ -202,6 +202,23 @@ export interface ContractComment {
   created_at: string;
 }
 
+export type JoinRequestStatus = "pending" | "accepted" | "rejected";
+
+export interface JoinRequest {
+  id: string;
+  project_id: string;
+  user_id: string | null;
+  display_name: string;
+  email: string | null;
+  requested_role: Role;
+  assigned_role: Role | null;
+  status: JoinRequestStatus;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  created_at: string;
+  updated_at?: string;
+}
+
 export interface Workspace {
   project: Project;
   members: Member[];
@@ -218,6 +235,7 @@ export interface Workspace {
   notes: Note[];
   handoffs: Handoff[];
   comments: ContractComment[];
+  joinRequests?: JoinRequest[];
 }
 
 export interface UserProject {

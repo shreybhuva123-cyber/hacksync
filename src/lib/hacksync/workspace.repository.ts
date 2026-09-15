@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { DatabaseError, NotFoundError, logger } from "@/lib/errors";
+import { joinRequestsService } from "@/lib/services/join-requests.service";
 import type {
   ActivityEvent,
   ApiContract,
@@ -12,6 +13,7 @@ import type {
   Handoff,
   HealthCheck,
   IntegrationLink,
+  JoinRequest,
   Member,
   Note,
   Project,
@@ -166,6 +168,7 @@ export const workspaceRepository = {
       notes: (notesRes.data as Note[]) ?? [],
       handoffs: (handoffsRes.data as Handoff[]) ?? [],
       comments: (commentsRes.data as ContractComment[]) ?? [],
+      joinRequests: await joinRequestsService.getProjectJoinRequests(pid).catch(() => []),
     };
   },
 };
