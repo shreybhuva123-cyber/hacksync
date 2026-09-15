@@ -47,6 +47,7 @@ interface MyWorkspaceViewProps {
   onSelectFile: (file: MemberFile) => void;
   selectedFileId: string | null;
   onOpenCodeSync: () => void;
+  onDirectoryConnected?: (info: { name: string; fileCount: number; handle: FileSystemDirectoryHandle | null }) => void;
 }
 
 interface UpdateSafetyModalState {
@@ -66,6 +67,7 @@ export function MyWorkspaceView({
   onSelectFile,
   selectedFileId,
   onOpenCodeSync,
+  onDirectoryConnected,
 }: MyWorkspaceViewProps) {
   const [isLinkingFile, setIsLinkingFile] = useState(false);
   const [isLinkingFolder, setIsLinkingFolder] = useState(false);
@@ -248,6 +250,9 @@ export function MyWorkspaceView({
       });
 
       onAddFiles(newFiles);
+      if (onDirectoryConnected) {
+        onDirectoryConnected({ name: res.name, fileCount: res.files.length, handle: res.handle });
+      }
       setFeedback(`Linked ${newFiles.length} files from folder "${res.name}"!`);
       setTimeout(() => setFeedback(null), 3500);
     } catch (err) {

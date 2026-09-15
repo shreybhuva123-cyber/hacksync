@@ -14,6 +14,7 @@ import {
   ShieldAlert,
   TestTube2,
   Gauge,
+  LogIn,
   Sparkles,
 } from "lucide-react";
 import {
@@ -33,6 +34,7 @@ interface CommandPaletteProps {
   onOpenChange: (open: boolean) => void;
   workspace?: Workspace | null | undefined;
   onOpenCopilot?: (() => void) | undefined;
+  onOpenJoin?: (() => void) | undefined;
 }
 
 export function CommandPalette({
@@ -40,6 +42,7 @@ export function CommandPalette({
   onOpenChange,
   workspace,
   onOpenCopilot,
+  onOpenJoin,
 }: CommandPaletteProps) {
   const navigate = useNavigate();
 
@@ -128,6 +131,19 @@ export function CommandPalette({
 
         {/* Quick Engineering Actions */}
         <CommandGroup heading="Engineering Actions">
+          {onOpenJoin ? (
+            <CommandItem
+              onSelect={() =>
+                handleSelect(() => {
+                  onOpenJoin();
+                })
+              }
+            >
+              <LogIn className="mr-2.5 size-4 text-primary" />
+              <span>Join Project via Invite Code</span>
+            </CommandItem>
+          ) : null}
+
           <CommandItem
             onSelect={() =>
               handleSelect(() => {

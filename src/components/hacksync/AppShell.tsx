@@ -14,6 +14,7 @@ import {
   KeyRound,
   LayoutDashboard,
   ListChecks,
+  LogIn,
   LogOut,
   Menu,
   MonitorPlay,
@@ -33,16 +34,19 @@ import {
   UserPlus,
   X,
 } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { signOut, useAuth } from "@/hooks/useAuth";
 import { useActiveProjectId, setActiveProjectId } from "@/hooks/useActiveProject";
-import { useWorkspace, useUserProjects } from "@/lib/hacksync/workspace";
+import { useWorkspace, useUserProjects, useJoinProject } from "@/lib/hacksync/workspace";
 import { computeReadiness, computeWarnings } from "@/lib/hacksync/analysis";
 import { auditWorkspaceSecurity } from "@/lib/hacksync/ai-security";
+import type { Role } from "@/lib/hacksync/types";
 import { RoleBadge, StatusPill } from "./primitives";
 import { AiCopilotModal } from "./AiCopilotModal";
 import { CommandPalette } from "./CommandPalette";
 import { InviteTeammatesModal } from "@/components/projects/InviteTeammatesModal";
+import { JoinProjectModal } from "@/components/projects/JoinProjectModal";
 import { TopTimerWidget } from "@/components/timer";
 import { useTheme } from "@/components/ThemeProvider";
 
@@ -63,11 +67,30 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [copilotOpen, setCopilotOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [joinOpen, setJoinOpen] = useState(false);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const navigate = useNavigate();
   const { user } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const { data: ws } = useWorkspace();
+  const joinProject = useJoinProject();
+
+  const handleJoinProject = async (input: { inviteCode: string; role: Role }) => {
+    try {
+      const project = await joinProject.mutateAsync({
+        inviteCode: input.inviteCode,
+        displayName: user?.email ? (user.email.split("@")[0] || "You") : "You",
+        role: input.role,
+        userId: user?.id ?? "local-user",
+      });
+      setActiveProjectId(project.id);
+      setJoinOpen(false);
+      void navigate({ to: "/dashboard" });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to join project");
+      throw error;
+    }
+  };
 
   const readiness = ws ? computeReadiness(ws) : null;
   const criticalCount = ws
@@ -165,7 +188,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
 
         {/* Project Switcher */}
-        <ProjectSwitcher />
+        <ProjectSwitcher onOpenJoin={() => setJoinOpen(true)} />
 
         <nav className="flex-1 overflow-y-auto px-2.5 py-3">
           {navGroups.map((section) => (
@@ -338,6 +361,17 @@ export function AppShell({ children }: { children: ReactNode }) {
               </button>
             ) : null}
 
+            {/* Join Project Action Button */}
+            <button
+              type="button"
+              onClick={() => setJoinOpen(true)}
+              className="flex items-center gap-1.5 rounded-[6px] border border-border bg-surface px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-surface-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              title="Join a project with invite code"
+            >
+              <LogIn className="size-3.5 text-primary" />
+              <span>Join</span>
+            </button>
+
             {/* Evidence-First AI Copilot Trigger */}
             <button
               type="button"
@@ -381,6 +415,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         onOpenChange={setCommandOpen}
         workspace={ws}
         onOpenCopilot={() => setCopilotOpen(true)}
+        onOpenJoin={() => setJoinOpen(true)}
       />
 
       {/* Global AI Copilot Workspace */}
@@ -398,13 +433,21 @@ export function AppShell({ children }: { children: ReactNode }) {
           workspace={ws}
         />
       ) : null}
+
+      {/* Join Project Modal */}
+      <JoinProjectModal
+        isOpen={joinOpen}
+        onClose={() => setJoinOpen(false)}
+        onSubmit={handleJoinProject}
+        isLoading={joinProject.isPending}
+      />
     </div>
   );
 }
 
 // ─── Project Switcher ──────────────────────────────────────────────────
 
-function ProjectSwitcher() {
+function ProjectSwitcher({ onOpenJoin }: { onOpenJoin?: () => void }) {
   const [dropOpen, setDropOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const { data: ws } = useWorkspace();
@@ -469,7 +512,20 @@ function ProjectSwitcher() {
               ) : null}
             </button>
           ))}
-          <div className="border-t border-border mt-1 pt-1">
+          <div className="border-t border-border mt-1 pt-1 space-y-0.5">
+            {onOpenJoin ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setDropOpen(false);
+                  onOpenJoin();
+                }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-surface-raised hover:text-foreground"
+              >
+                <LogIn className="size-3 text-primary" />
+                <span>Join with invite code</span>
+              </button>
+            ) : null}
             <Link
               to="/projects"
               onClick={() => setDropOpen(false)}

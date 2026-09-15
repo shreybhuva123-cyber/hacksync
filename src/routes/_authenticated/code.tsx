@@ -209,9 +209,9 @@ function CodeBody({ ws }: { ws: Workspace }) {
   const handleAddMemberFiles = useCallback(
     async (newFiles: Omit<MemberFile, "id" | "created_at" | "updated_at">[]) => {
       const defaultRole = currentRole === "owner" ? "lead" : currentRole;
-      const createdMembers: MemberFile[] = newFiles.map((f, idx) => ({
+      const createdMembers: MemberFile[] = newFiles.map((f) => ({
         ...f,
-        id: `mf-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
+        id: crypto.randomUUID(),
         project_id: ws.project.id,
         user_id: user?.id ?? null,
         member_id: callerMember?.id ?? null,
@@ -234,8 +234,8 @@ function CodeBody({ ws }: { ws: Workspace }) {
       });
 
       // 2. Also populate local CodeNodes for unified shared view
-      const createdNodes: CodeNode[] = createdMembers.map((m, idx) => ({
-        id: `local-node-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
+      const createdNodes: CodeNode[] = createdMembers.map((m) => ({
+        id: crypto.randomUUID(),
         project_id: ws.project.id,
         path: m.relative_path,
         parent_path: m.relative_path.includes("/")
@@ -348,10 +348,31 @@ function CodeBody({ ws }: { ws: Workspace }) {
 
   // Push All to Disk
   const handlePushAllToDisk = async () => {
-    const handle = getActiveDirectoryHandle();
+    let handle = getActiveDirectoryHandle();
+    if (!handle) {
+      try {
+        const res = await pickDirectoryUniversal();
+        if (res?.handle) {
+          handle = res.handle;
+          setActiveDirectoryHandle(res.handle);
+          const state: LocalDirectoryState = {
+            connected: true,
+            name: res.name,
+            fileCount: res.files.length,
+            lastSyncedAt: new Date().toISOString(),
+            autoSync: true,
+          };
+          setLocalDir(state);
+          saveStoredDirectoryState(state);
+        }
+      } catch (err) {
+        console.warn("Folder picker error during push to disk:", err);
+      }
+    }
+
     if (!handle) {
       setSyncFeedback("Connect a local folder first to push files to disk.");
-      setTimeout(() => setSyncFeedback(null), 3500);
+      setTimeout(() => setSyncFeedback(null), 4000);
       return;
     }
 
@@ -656,6 +677,25 @@ function CodeBody({ ws }: { ws: Workspace }) {
 
             <button
               type="button"
+              onClick={handleConnectDirectory}
+              disabled={isSyncing}
+              className="flex items-center gap-1.5 rounded-[6px] border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-surface-raised transition-colors shadow-sm disabled:opacity-50"
+              title={
+                localDir.connected
+                  ? `Linked folder: "${localDir.name}". Click to change or re-link.`
+                  : "Link local folder from your computer"
+              }
+            >
+              {isSyncing ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <FolderPlus className="size-3.5 text-primary" />
+              )}
+              <span>{localDir.connected ? `📁 ${localDir.name}` : "Link Folder"}</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => setShowGitHubPushModal(true)}
               className="flex items-center gap-1.5 rounded-[6px] border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-surface-raised transition-colors shadow-sm"
             >
@@ -743,6 +783,18 @@ function CodeBody({ ws }: { ws: Workspace }) {
           }}
           selectedFileId={selectedId}
           onOpenCodeSync={() => setShowCodeSyncModal(true)}
+          onDirectoryConnected={(info) => {
+            const state: LocalDirectoryState = {
+              connected: true,
+              name: info.name,
+              fileCount: info.fileCount,
+              lastSyncedAt: new Date().toISOString(),
+              autoSync: Boolean(info.handle),
+            };
+            setLocalDir(state);
+            saveStoredDirectoryState(state);
+            if (info.handle) setActiveDirectoryHandle(info.handle);
+          }}
         />
       )}
 
@@ -807,18 +859,32 @@ function CodeBody({ ws }: { ws: Workspace }) {
                   <span>Export ZIP</span>
                 </button>
 
-                {/* 💾 Disk Auto-Sync Button if Folder Connected */}
-                {localDir.connected && (
-                  <button
-                    type="button"
-                    onClick={handlePushAllToDisk}
-                    disabled={isSyncing}
-                    className="flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/20 transition-colors shadow-sm disabled:opacity-50"
-                  >
-                    {isSyncing ? <Loader2 className="size-3.5 animate-spin" /> : <HardDrive className="size-3.5" />}
-                    <span>Sync to Disk</span>
-                  </button>
-                )}
+                {/* 📂 Connect / Link Local Folder */}
+                <button
+                  type="button"
+                  onClick={handleConnectDirectory}
+                  disabled={isSyncing}
+                  className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-accent transition-colors shadow-sm disabled:opacity-50"
+                  title={
+                    localDir.connected
+                      ? `Linked: "${localDir.name}". Click to re-link a different folder.`
+                      : "Connect a local folder from your computer"
+                  }
+                >
+                  {isSyncing ? <Loader2 className="size-3.5 animate-spin" /> : <FolderPlus className="size-3.5 text-primary" />}
+                  <span>{localDir.connected ? `📁 ${localDir.name}` : "Link Folder"}</span>
+                </button>
+
+                {/* 💾 Sync to Disk (always visible, auto-prompts folder if not connected) */}
+                <button
+                  type="button"
+                  onClick={handlePushAllToDisk}
+                  disabled={isSyncing}
+                  className="flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/20 transition-colors shadow-sm disabled:opacity-50"
+                >
+                  {isSyncing ? <Loader2 className="size-3.5 animate-spin" /> : <HardDrive className="size-3.5" />}
+                  <span>Sync to Disk</span>
+                </button>
 
                 <button
                   type="button"
