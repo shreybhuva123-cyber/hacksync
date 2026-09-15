@@ -78,7 +78,7 @@ function Landing() {
               type="button"
               onClick={toggleTheme}
               className="flex items-center justify-center size-8 rounded-md border border-border bg-surface text-muted-foreground transition-colors hover:bg-surface-raised hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-              title={theme === "dark" ? "Switch to Beige Light Mode" : "Switch to Dark Mode"}
+              title={theme === "dark" ? "Switch to Off-White Light Mode" : "Switch to Dark Mode"}
               aria-label="Toggle theme"
             >
               {theme === "dark" ? (

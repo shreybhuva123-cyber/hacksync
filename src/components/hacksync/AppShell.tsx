@@ -315,7 +315,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               type="button"
               onClick={toggleTheme}
               className="flex items-center justify-center size-7 rounded-[6px] border border-border bg-surface text-muted-foreground transition-colors hover:bg-surface-raised hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-              title={theme === "dark" ? "Switch to Beige Light Mode" : "Switch to Dark Mode"}
+              title={theme === "dark" ? "Switch to Off-White Light Mode" : "Switch to Dark Mode"}
               aria-label="Toggle dark and light theme"
             >
               {theme === "dark" ? (
