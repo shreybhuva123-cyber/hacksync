@@ -36,6 +36,9 @@ export class GitStatusManager {
 
     // 2. Get porcelain status
     const statusRes = await GitSafety.runSafeGit(repoPath, ["status", "--porcelain=v1", "-u"]);
+    if (statusRes.exitCode !== 0) {
+      return { isClean: false, totalChangedFiles: 0, error: statusRes.stderr || 'Git command failed', summaryText: 'Git error: unable to determine status' } as any;
+    }
     const output = statusRes.stdout;
 
     return this.parsePorcelainOutput(output, branch);

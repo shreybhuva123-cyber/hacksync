@@ -45,9 +45,6 @@ export async function verifyProjectMembership(
     if (testMatch) {
       return { allowed: true, role: testMatch.role };
     }
-    if (userId.includes("lead") || userId.includes("owner")) {
-      return { allowed: true, role: "lead" };
-    }
     if (!process.env["SUPABASE_SERVICE_ROLE_KEY"]) {
       return { allowed: false, role: "member" };
     }

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import type { Session, User, AuthError } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import { logger } from "@/lib/errors";
@@ -16,6 +17,7 @@ export interface AuthState {
  * and eliminates all fake guest/mock token creation.
  */
 export function useAuth(): AuthState {
+  const queryClient = useQueryClient();
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<AuthError | Error | null>(null);
@@ -48,6 +50,12 @@ export function useAuth(): AuthState {
     } = supabase.auth.onAuthStateChange((event, nextSession) => {
       if (!mounted) return;
       logger.info(`Auth state changed: ${event}`, { userId: nextSession?.user?.id });
+      
+      if (event === "SIGNED_OUT") {
+        localStorage.removeItem("hacksync:active-project-id");
+        queryClient.clear();
+      }
+
       setSession(nextSession);
       setLoading(false);
     });
@@ -56,7 +64,7 @@ export function useAuth(): AuthState {
       mounted = false;
       subscription.unsubscribe();
     };
-  }, []);
+  }, [queryClient]);
 
   return {
     session,

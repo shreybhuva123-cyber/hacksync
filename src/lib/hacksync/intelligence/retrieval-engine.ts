@@ -197,7 +197,8 @@ export class HybridRetrievalEngine {
       if (data.symbols.length > 0 && data.symbols[0]) {
         const topSym = data.symbols[0];
         lineRange = { start: topSym.lineStart, end: Math.min(lines.length, topSym.lineEnd) };
-        snippet = lines.slice(lineRange.start - 1, lineRange.end).join("\n");
+        const sliceStart = Math.max(0, (lineRange?.start ?? 1) - 1);
+        snippet = lines.slice(sliceStart, lineRange?.end ?? 30).join("\n");
       } else if (lines.length > 0) {
         lineRange = { start: 1, end: Math.min(lines.length, 30) };
         snippet = lines.slice(0, 30).join("\n");

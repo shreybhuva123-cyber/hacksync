@@ -287,7 +287,7 @@ export const githubService = {
           headers,
           body: JSON.stringify({
             sha: commitSha,
-            force: true,
+            force: false,
           }),
         },
       );

@@ -3,6 +3,7 @@ import { TenantGuard } from "@/lib/hacksync/security/tenant-guard";
 import { SecretRedactor } from "@/lib/hacksync/security/secret-redactor";
 import { AuditTrail } from "@/lib/hacksync/security/audit-trail";
 import { ApprovalGate } from "@/lib/hacksync/ai/approval-gate";
+import { registerTestMembership, clearTestMemberships } from "@/lib/security/tenant-verifier";
 import { TypeScriptParser } from "@/lib/hacksync/intelligence/parsers/typescript-parser";
 import { JavaScriptParser } from "@/lib/hacksync/intelligence/parsers/javascript-parser";
 import { JsonParser } from "@/lib/hacksync/intelligence/parsers/json-parser";
@@ -245,6 +246,9 @@ describe("Phase 0: Production Foundation & Security Controls", () => {
     expect(ApprovalGate.getToolTier("search_project")).toBe("READ_ONLY");
     expect(ApprovalGate.getToolTier("apply_patch")).toBe("MUTATING");
     expect(ApprovalGate.isMutating("apply_patch")).toBe(true);
+
+    // Register test membership for the user resolving this approval
+    registerTestMembership("proj-startup-ai", "usr-lead-1", "lead");
 
     const req = ApprovalGate.createApprovalRequest({
       requestId: "req-appr-1",

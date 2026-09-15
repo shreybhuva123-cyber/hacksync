@@ -447,8 +447,11 @@ export async function processServerAIQuery(
   const validated = aiQuerySchema.parse(input);
 
   const requestId = AIObservability.generateRequestId();
+  const effectiveQuery = systemPrompt
+    ? `[System Context: ${systemPrompt}]\n\n${validated.prompt}`
+    : validated.prompt;
   const res = await AIOrchestrator.processQuery({
-    query: validated.prompt,
+    query: effectiveQuery,
     userId: clientKey,
     securityContext: {
       userId: clientKey,

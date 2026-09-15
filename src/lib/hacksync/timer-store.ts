@@ -173,66 +173,57 @@ export function useTopTimer() {
           nextStopwatch += 1;
         }
 
-        const nextState = {
+        return {
           ...prev,
           secondsRemaining: nextRemaining,
           stopwatchSeconds: nextStopwatch,
           lastUpdated: Date.now(),
         };
-        saveTimerState(nextState);
-        return nextState;
       });
     }, 1000);
 
     return () => clearInterval(interval);
   }, [timerState.isRunning, timerState.mode]);
 
+  // Sync state to storage
+  useEffect(() => {
+    if (timerState) saveTimerState(timerState);
+  }, [timerState]);
+
   const toggleRunning = useCallback(() => {
-    setTimerState((prev) => {
-      const next = { ...prev, isRunning: !prev.isRunning, lastUpdated: Date.now() };
-      saveTimerState(next);
-      return next;
-    });
+    setTimerState((prev) => ({
+      ...prev,
+      isRunning: !prev.isRunning,
+      lastUpdated: Date.now(),
+    }));
   }, []);
 
   const resetTimer = useCallback(() => {
-    setTimerState((prev) => {
-      const next = {
-        ...prev,
-        secondsRemaining: prev.totalDurationSeconds,
-        stopwatchSeconds: 0,
-        lastUpdated: Date.now(),
-      };
-      saveTimerState(next);
-      return next;
-    });
+    setTimerState((prev) => ({
+      ...prev,
+      secondsRemaining: prev.totalDurationSeconds,
+      stopwatchSeconds: 0,
+      lastUpdated: Date.now(),
+    }));
   }, []);
 
   const setPresetDuration = useCallback((seconds: number) => {
-    setTimerState((prev) => {
-      const next = {
-        ...prev,
-        totalDurationSeconds: seconds,
-        secondsRemaining: seconds,
-        mode: "countdown" as TimerMode,
-        lastUpdated: Date.now(),
-      };
-      saveTimerState(next);
-      return next;
-    });
+    setTimerState((prev) => ({
+      ...prev,
+      totalDurationSeconds: seconds,
+      secondsRemaining: seconds,
+      mode: "countdown" as TimerMode,
+      lastUpdated: Date.now(),
+    }));
   }, []);
 
   const setMode = useCallback((mode: TimerMode) => {
-    setTimerState((prev) => {
-      const next = {
-        ...prev,
-        mode,
-        stopwatchSeconds: mode === "stopwatch" ? 0 : prev.stopwatchSeconds,
-        lastUpdated: Date.now(),
-      };
-      saveTimerState(next);
-      return next;
-    });
+    setTimerState((prev) => ({
+      ...prev,
+      mode,
+      stopwatchSeconds: mode === "stopwatch" ? 0 : prev.stopwatchSeconds,
+      lastUpdated: Date.now(),
+    }));
   }, []);
 
   const addHistoryEntry = useCallback(

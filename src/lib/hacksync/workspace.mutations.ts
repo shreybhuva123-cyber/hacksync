@@ -22,7 +22,7 @@ export function useCreateProject() {
     onSuccess: (project) => {
       setActiveProjectId(project.id);
       queryClient.invalidateQueries({ queryKey: USER_PROJECTS_KEY });
-      queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY });
+      queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY, exact: false });
     },
   });
 }
@@ -36,7 +36,7 @@ export function useJoinProject() {
     onSuccess: (project) => {
       setActiveProjectId(project.id);
       queryClient.invalidateQueries({ queryKey: USER_PROJECTS_KEY });
-      queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY });
+      queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY, exact: false });
     },
   });
 }
@@ -47,7 +47,7 @@ export function useCreateTask() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: tasksService.createTask,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY, exact: false }),
   });
 }
 
@@ -56,7 +56,7 @@ export function useUpdateTask() {
   return useMutation({
     mutationFn: ({ id, input }: { id: string; input: Parameters<typeof tasksService.updateTask>[1] }) =>
       tasksService.updateTask(id, input),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY, exact: false }),
   });
 }
 
@@ -64,7 +64,7 @@ export function useDeleteTask() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: tasksService.deleteTask,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY, exact: false }),
   });
 }
 
@@ -74,7 +74,7 @@ export function useCreateContract() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: contractsService.createContract,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY, exact: false }),
   });
 }
 
@@ -83,7 +83,7 @@ export function useUpdateContract() {
   return useMutation({
     mutationFn: ({ id, input }: { id: string; input: Parameters<typeof contractsService.updateContract>[1] }) =>
       contractsService.updateContract(id, input),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY, exact: false }),
   });
 }
 
@@ -91,7 +91,7 @@ export function useToggleLockContract() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: contractsService.toggleLock,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY, exact: false }),
   });
 }
 
@@ -99,7 +99,7 @@ export function useDeleteContract() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: contractsService.deleteContract,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY, exact: false }),
   });
 }
 
@@ -109,7 +109,7 @@ export function useCreateTable() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: schemaService.createTable,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY, exact: false }),
   });
 }
 
@@ -117,7 +117,7 @@ export function useDeleteTable() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: schemaService.deleteTable,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY, exact: false }),
   });
 }
 
@@ -125,7 +125,7 @@ export function useAddColumn() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: schemaService.addColumn,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY, exact: false }),
   });
 }
 
@@ -136,7 +136,7 @@ export function useUpdateMemberRole() {
   return useMutation({
     mutationFn: ({ id, role, callerRole }: { id: string; role: string; callerRole?: string | null }) =>
       membersService.updateRole(id, role, callerRole),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY, exact: false }),
   });
 }
 
@@ -145,7 +145,7 @@ export function useRemoveMember() {
   return useMutation({
     mutationFn: ({ id, callerRole, isSelfLeave }: { id: string; callerRole?: string | null; isSelfLeave?: boolean }) =>
       membersService.removeMember(id, callerRole, isSelfLeave),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY, exact: false }),
   });
 }
 
@@ -176,7 +176,7 @@ export function useRowMutation() {
       const { error } = await (supabase as any).from(input.table).update(input.values).eq("id", input.id);
       if (error) throw error;
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY, exact: false }),
   });
 }
 
@@ -187,7 +187,7 @@ export function useRowInsert() {
       const { error } = await (supabase as any).from(input.table).insert(input.values);
       if (error) throw error;
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY, exact: false }),
   });
 }
 
@@ -198,7 +198,7 @@ export function useRowDelete() {
       const { error } = await (supabase as any).from(input.table).delete().eq("id", input.id);
       if (error) throw error;
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: WORKSPACE_KEY, exact: false }),
   });
 }
 

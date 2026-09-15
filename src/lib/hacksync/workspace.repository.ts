@@ -146,7 +146,7 @@ export const workspaceRepository = {
         .from("db_columns")
         .select("*")
         .in("table_id", tableIds)
-        .order("created_at");
+        .order("ordinal");
       columns = (cols as DbColumn[]) ?? [];
     }
 

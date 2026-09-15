@@ -108,6 +108,10 @@ export class ProjectKnowledgeGraph {
    * Leverages content hash caching to avoid redundant re-parsing.
    */
   indexFile(path: string, content: string): ParsedAstSummary | null {
+    const MAX_INDEX_FILE_BYTES = 512 * 1024; // 512KB
+    if (content == null || content.length > MAX_INDEX_FILE_BYTES || (content.length > 0 && content.includes('\0'))) {
+      return null; // Skip binary or oversized files
+    }
     const hash = computeContentHash(content);
     const existingHash = this.fileHashes.get(path);
 

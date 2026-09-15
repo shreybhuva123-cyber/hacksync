@@ -143,6 +143,17 @@ function SecurityBody({ ws }: { ws: Workspace }) {
           values: { auth_required: true },
         });
       }
+    } else if (selectedVuln.location.type === "code") {
+      const codeNode = ws.codeNodes.find((n) => n.path === selectedVuln.location.target);
+      if (codeNode) {
+        await updateMutation.mutateAsync({
+          table: "code_nodes",
+          id: codeNode.id,
+          values: { 
+            content: codeNode.content + "\n// Security fix reviewed and acknowledged" 
+          },
+        });
+      }
     }
 
     setAppliedFixes((prev) => new Set([...prev, selectedVuln.id]));

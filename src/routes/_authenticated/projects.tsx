@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { toast } from "sonner";
 import { WorkspaceView } from "@/components/hacksync/WorkspaceView";
 import { PageHeader } from "@/components/hacksync/primitives";
 import { useAuth } from "@/hooks/useAuth";
@@ -72,42 +73,50 @@ function ProjectsBody() {
     directoryHandle?: FileSystemDirectoryHandle | null | undefined;
     autoScaffold?: boolean | undefined;
   }) => {
-    const project = await createProject.mutateAsync({
-      name: input.name,
-      ...(input.description ? { description: input.description } : {}),
-      ...(input.repo_url ? { repo_url: input.repo_url } : {}),
-      role: input.role,
-      displayName: user?.email ? (user.email.split("@")[0] || "You") : "You",
-      userId: user?.id ?? "local-user",
-    });
+    try {
+      const project = await createProject.mutateAsync({
+        name: input.name,
+        ...(input.description ? { description: input.description } : {}),
+        ...(input.repo_url ? { repo_url: input.repo_url } : {}),
+        role: input.role,
+        displayName: user?.email ? (user.email.split("@")[0] || "You") : "You",
+        userId: user?.id ?? "local-user",
+      });
 
-    if (input.directoryHandle) {
-      try {
-        const subfolder = await createProjectSubfolder(input.directoryHandle, input.name);
-        if (input.autoScaffold) {
-          await scaffoldInitialProjectFiles(subfolder, input.name, input.role);
+      if (input.directoryHandle) {
+        try {
+          const subfolder = await createProjectSubfolder(input.directoryHandle, input.name);
+          if (input.autoScaffold) {
+            await scaffoldInitialProjectFiles(subfolder, input.name, input.role);
+          }
+          setActiveDirectoryHandle(subfolder);
+          saveStoredDirectoryState({ connected: true, name: input.name });
+        } catch (err) {
+          console.warn("Could not create local subfolder:", err);
         }
-        setActiveDirectoryHandle(subfolder);
-        saveStoredDirectoryState({ connected: true, name: input.name });
-      } catch (err) {
-        console.warn("Could not create local subfolder:", err);
       }
-    }
 
-    setActiveProjectId(project.id);
-    navigate({ to: "/dashboard" });
+      setActiveProjectId(project.id);
+      navigate({ to: "/dashboard" });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to create project");
+    }
   };
 
   const handleJoin = async (input: { inviteCode: string; role: Role }) => {
-    const project = await joinProject.mutateAsync({
-      inviteCode: input.inviteCode,
-      displayName: user?.email ? (user.email.split("@")[0] || "You") : "You",
-      role: input.role,
-      userId: user?.id ?? "local-user",
-    });
+    try {
+      const project = await joinProject.mutateAsync({
+        inviteCode: input.inviteCode,
+        displayName: user?.email ? (user.email.split("@")[0] || "You") : "You",
+        role: input.role,
+        userId: user?.id ?? "local-user",
+      });
 
-    setActiveProjectId(project.id);
-    navigate({ to: "/dashboard" });
+      setActiveProjectId(project.id);
+      navigate({ to: "/dashboard" });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to join project");
+    }
   };
 
   const handleSelectProject = (projectId: string) => {

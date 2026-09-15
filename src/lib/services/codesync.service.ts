@@ -777,13 +777,15 @@ export const codeSyncService = {
       );
 
       // 2. Mark member_files as synced in database (non-blocking background)
+      const syncedPaths = resolvedItems.map(r => r.path.replace(/^\/+/, '').replace(/\\\\/g, '/'));
       void withDbTimeout(
         (supabase.from as any)("member_files")
           .update({
             sync_status: "synced",
             updated_at: new Date().toISOString(),
           })
-          .eq("project_id", projectId),
+          .eq("project_id", projectId)
+          .in("relative_path", syncedPaths),
         750,
       );
 

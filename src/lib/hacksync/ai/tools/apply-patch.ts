@@ -32,7 +32,7 @@ export class ApplyPatchTool {
 
     return PatchApplier.apply({
       projectId,
-      userId: params.userId || userId,
+      userId: userId,
       approvalId: params.approvalId,
       patch: params.patch,
       graph,

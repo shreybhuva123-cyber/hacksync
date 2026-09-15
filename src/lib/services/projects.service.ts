@@ -132,38 +132,17 @@ export const projectsService = {
    */
   async joinProject(input: JoinProjectInput): Promise<Project> {
     const validated = joinProjectSchema.parse(input);
-
-    // 1. Locate project
-    const { data: project, error: findErr } = await supabase
-      .from("projects")
-      .select("*")
-      .eq("invite_code", validated.inviteCode)
-      .maybeSingle();
-
-    if (findErr) throw new DatabaseError(findErr.message, findErr);
-    if (!project) throw new NotFoundError("Project with that invite code");
-
-    // 2. Check existing membership
-    const { data: existing } = await supabase
-      .from("project_members")
-      .select("id")
-      .eq("project_id", project.id)
-      .eq("user_id", validated.userId)
-      .maybeSingle();
-
-    if (existing) {
-      return project as Project;
-    }
-
-    // 3. Add as new member via secure RPC (no direct table INSERT — RLS blocks self-insert)
     const joinRole = validated.role === "owner" ? "member" : validated.role;
-    const { error: joinErr } = await (supabase.rpc as any)("join_project_by_code", {
+
+    // Call secure RPC directly to bypass RLS blocks
+    const { data: project, error: joinErr } = await (supabase.rpc as any)("join_project_by_code", {
       p_invite_code: validated.inviteCode,
       p_display_name: validated.displayName,
       p_role: joinRole,
     });
 
     if (joinErr) throw new DatabaseError(joinErr.message, joinErr);
+    if (!project) throw new NotFoundError("Project not found or invalid invite code");
 
     await supabase.from("activity_events").insert({
       project_id: project.id,

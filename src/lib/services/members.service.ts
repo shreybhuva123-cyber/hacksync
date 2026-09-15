@@ -17,7 +17,7 @@ export const membersService = {
     const validatedRole = roleEnum.parse(role) as ProjectRole;
 
     // Strict client-side privilege escalation guard
-    if (callerRole && !canManageMembers(callerRole)) {
+    if (!callerRole || !canManageMembers(callerRole)) {
       throw new AuthorizationError(
         "Only project owners and team leads can change member roles. Self-service role promotion is prohibited.",
       );
@@ -91,7 +91,7 @@ export const membersService = {
     callerRole?: string | null,
     isSelfLeave = false,
   ): Promise<void> {
-    if (callerRole && !canManageMembers(callerRole) && !isSelfLeave) {
+    if (!isSelfLeave && (!callerRole || !canManageMembers(callerRole))) {
       throw new AuthorizationError(
         "You do not have permission to remove team members from this project.",
       );

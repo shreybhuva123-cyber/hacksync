@@ -113,6 +113,7 @@ function PitchBody({ ws }: { ws: Workspace }) {
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || (e.target as HTMLElement)?.isContentEditable) return;
       if (e.key === "ArrowRight" || e.key === " ") {
         e.preventDefault();
         nextSlide();

@@ -374,6 +374,7 @@ function ProjectSettingsBody({ ws }: { ws: Workspace }) {
       setIsDeletingProject(true);
       setDeleteError(null);
       await projectsService.deleteProject(ws.project.id);
+      localStorage.removeItem("hacksync:active-project-id");
       navigate({ to: "/projects" });
     } catch (err) {
       setDeleteError(err instanceof Error ? err.message : "Failed to delete project.");
@@ -389,7 +390,8 @@ function ProjectSettingsBody({ ws }: { ws: Workspace }) {
 
     try {
       setIsLeaving(true);
-      await membersService.removeMember(callerMember.id, callerRole);
+      await membersService.removeMember(callerMember.id, callerRole, true);
+      localStorage.removeItem("hacksync:active-project-id");
       navigate({ to: "/projects" });
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to leave project.");

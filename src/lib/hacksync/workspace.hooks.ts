@@ -24,6 +24,7 @@ export function useWorkspaceRealtime(activeProjectId?: string | null) {
           {
             event: "*",
             schema: "public",
+            table: "code_nodes",
             filter: `project_id=eq.${activeProjectId}`,
           },
           () => {

@@ -50,6 +50,16 @@ export class BM25SearchIndex {
       content,
     };
 
+    if (this.documents.has(path)) {
+      const oldDoc = this.documents.get(path)!;
+      const oldTokenSet = new Set(oldDoc.tokens);
+      for (const term of oldTokenSet) {
+        const count = this.docFrequency.get(term) || 0;
+        if (count <= 1) this.docFrequency.delete(term);
+        else this.docFrequency.set(term, count - 1);
+      }
+    }
+
     // Update term frequencies
     const uniqueTerms = new Set(tokens);
     uniqueTerms.forEach((term) => {
