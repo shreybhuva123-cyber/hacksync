@@ -135,7 +135,9 @@ export {
 
 import { verifyProjectMembership } from "@/lib/security/tenant-verifier";
 
-export async function authenticateRequest(request: Request): Promise<{ userId: string; email?: string } | null> {
+export async function authenticateRequest(
+  request: Request,
+): Promise<{ userId: string; email?: string; token?: string } | null> {
   const authHeader = request.headers.get("Authorization") || request.headers.get("authorization");
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     return null;
@@ -147,7 +149,7 @@ export async function authenticateRequest(request: Request): Promise<{ userId: s
   // In test environment ONLY, allow explicit test: prefixed credentials for unit test isolation
   if (process.env["NODE_ENV"] === "test" && token.startsWith("test:")) {
     const userId = token.slice(5);
-    return { userId, email: `${userId}@hacksync.dev` };
+    return { userId, email: `${userId}@hacksync.dev`, token };
   }
 
   // Reject raw user IDs or test tokens in production / non-test environments
@@ -160,7 +162,7 @@ export async function authenticateRequest(request: Request): Promise<{ userId: s
     if (error || !data?.user) {
       return null;
     }
-    return { userId: data.user.id, ...(data.user.email ? { email: data.user.email } : {}) };
+    return { userId: data.user.id, ...(data.user.email ? { email: data.user.email } : {}), token };
   } catch {
     return null;
   }
@@ -267,7 +269,7 @@ export async function handleAIQueryRequest(request: Request): Promise<Response> 
   }
 
   // 5. Tenant Authorization & Project Membership Check
-  const membership = await verifyProjectMembership(userId, projectId);
+  const membership = await verifyProjectMembership(userId, projectId, auth.token);
   if (!membership.allowed) {
     // Record security audit event
     AuditTrail.record({
@@ -382,7 +384,7 @@ export async function handleAIApprovalRequest(request: Request): Promise<Respons
   }
 
   // Tenant Authorization
-  const membership = await verifyProjectMembership(userId, projectId);
+  const membership = await verifyProjectMembership(userId, projectId, auth.token);
   if (!membership.allowed) {
     return createSanitizedErrorResponse("AI_FORBIDDEN", "Unauthorized to resolve approvals for this project.", requestId, 403);
   }
