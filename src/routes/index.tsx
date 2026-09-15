@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Boxes, Database, GitBranch, Network, PlugZap, ShieldCheck, Terminal, Zap } from "lucide-react";
+import { Boxes, Database, GitBranch, Network, PlugZap, ShieldCheck, Terminal, Zap, Sun, Moon } from "lucide-react";
 import { StatusPill } from "@/components/hacksync/primitives";
+import { useTheme } from "@/components/ThemeProvider";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -58,6 +59,8 @@ const FEATURES = [
 ];
 
 function Landing() {
+  const { theme, toggleTheme } = useTheme();
+
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-20 border-b border-border bg-background/80 backdrop-blur">
@@ -70,13 +73,28 @@ function Landing() {
               Hack<span className="text-primary">Sync</span>
             </span>
           </div>
-          <Link
-            to="/auth"
-            search={{ redirect: "/dashboard" }}
-            className="rounded-md bg-primary px-3.5 py-1.5 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90"
-          >
-            Enter workspace
-          </Link>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={toggleTheme}
+              className="flex items-center justify-center size-8 rounded-md border border-border bg-surface text-muted-foreground transition-colors hover:bg-surface-raised hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              title={theme === "dark" ? "Switch to Beige Light Mode" : "Switch to Dark Mode"}
+              aria-label="Toggle theme"
+            >
+              {theme === "dark" ? (
+                <Sun className="size-4 text-warning" />
+              ) : (
+                <Moon className="size-4 text-primary" />
+              )}
+            </button>
+            <Link
+              to="/auth"
+              search={{ redirect: "/dashboard" }}
+              className="rounded-md bg-primary px-3.5 py-1.5 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90"
+            >
+              Enter workspace
+            </Link>
+          </div>
         </div>
       </header>
 

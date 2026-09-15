@@ -17,6 +17,7 @@ import {
   LogOut,
   Menu,
   MonitorPlay,
+  Moon,
   Network,
   PlugZap,
   Search,
@@ -25,6 +26,7 @@ import {
   ShieldCheck,
   Sliders,
   Sparkles,
+  Sun,
   Terminal,
   TestTube2,
   Trophy,
@@ -42,6 +44,7 @@ import { AiCopilotModal } from "./AiCopilotModal";
 import { CommandPalette } from "./CommandPalette";
 import { InviteTeammatesModal } from "@/components/projects/InviteTeammatesModal";
 import { TopTimerWidget } from "@/components/timer";
+import { useTheme } from "@/components/ThemeProvider";
 
 interface NavItem {
   to: string;
@@ -63,6 +66,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const { data: ws } = useWorkspace();
 
   const readiness = ws ? computeReadiness(ws) : null;
@@ -305,6 +309,21 @@ export function AppShell({ children }: { children: ReactNode }) {
 
             {/* Top Timer Widget */}
             <TopTimerWidget />
+
+            {/* Dark / Beige Light Mode Toggle Button */}
+            <button
+              type="button"
+              onClick={toggleTheme}
+              className="flex items-center justify-center size-7 rounded-[6px] border border-border bg-surface text-muted-foreground transition-colors hover:bg-surface-raised hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              title={theme === "dark" ? "Switch to Beige Light Mode" : "Switch to Dark Mode"}
+              aria-label="Toggle dark and light theme"
+            >
+              {theme === "dark" ? (
+                <Sun className="size-3.5 text-warning" />
+              ) : (
+                <Moon className="size-3.5 text-primary" />
+              )}
+            </button>
 
             {/* Invite Teammates Action Button */}
             {ws ? (
