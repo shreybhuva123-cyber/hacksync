@@ -6,6 +6,7 @@ import {
   useRouter,
   HeadContent,
   Scripts,
+  isRedirect,
 } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
 
@@ -38,19 +39,47 @@ function NotFoundComponent() {
 function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   console.error(error);
   const router = useRouter();
+
   useEffect(() => {
+    if (isRedirect(error)) {
+      const redirectUrl =
+        (error as any)?.options?.href ||
+        (error as any)?.options?.to ||
+        (error instanceof Response && error.headers.get("location")) ||
+        "/auth";
+      window.location.href = redirectUrl;
+      return;
+    }
     reportLovableError(error, { boundary: "tanstack_root_error_component" });
   }, [error]);
 
+  if (isRedirect(error)) {
+    return null;
+  }
+
+  const errorMessage =
+    error instanceof Response
+      ? `HTTP ${error.status}: ${error.statusText || "Response error"}`
+      : error instanceof Error
+        ? error.message || error.name
+        : String(error);
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <div className="max-w-md text-center">
+      <div className="max-w-lg text-center">
         <h1 className="text-xl font-semibold tracking-tight text-foreground">
           This page didn't load
         </h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Something went wrong on our end. You can try refreshing or head back home.
+          Something went wrong while rendering this route.
         </p>
+
+        {errorMessage && (
+          <div className="mt-4 max-h-40 overflow-auto rounded-md border border-destructive/30 bg-destructive/10 p-3 text-left font-mono text-xs text-destructive">
+            {errorMessage}
+          </div>
+        )}
+
         <div className="mt-6 flex flex-wrap justify-center gap-2">
           <button
             onClick={() => {
@@ -66,6 +95,12 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
             className="inline-flex items-center justify-center rounded-md border border-input bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent"
           >
             Go home
+          </a>
+          <a
+            href="/auth"
+            className="inline-flex items-center justify-center rounded-md bg-secondary px-4 py-2 text-sm font-medium text-secondary-foreground transition-colors hover:bg-accent"
+          >
+            Sign in
           </a>
         </div>
       </div>
