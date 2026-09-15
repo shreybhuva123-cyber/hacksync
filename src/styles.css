@@ -129,56 +129,56 @@
 }
 
 .light {
-  --background: #F8F9FA;
-  --foreground: #090D14;
-  --surface: #F0F2F5;
-  --surface-raised: #E8EBF0;
+  --background: #F8FAFC;
+  --foreground: #0F172A;
+  --surface: #F1F5F9;
+  --surface-raised: #E2E8F0;
   --card: #FFFFFF;
-  --card-foreground: #090D14;
+  --card-foreground: #0F172A;
   --popover: #FFFFFF;
-  --popover-foreground: #090D14;
+  --popover-foreground: #0F172A;
 
   --primary: #2563EB;
   --primary-foreground: #FFFFFF;
-  --secondary: #F0F2F5;
-  --secondary-foreground: #090D14;
-  --muted: #F0F2F5;
-  --muted-foreground: #5A6578;
-  --accent: #E4E7ED;
-  --accent-foreground: #090D14;
+  --secondary: #F1F5F9;
+  --secondary-foreground: #0F172A;
+  --muted: #F1F5F9;
+  --muted-foreground: #64748B;
+  --accent: #E2E8F0;
+  --accent-foreground: #0F172A;
 
-  --destructive: #DC2626;
+  --destructive: #EF4444;
   --destructive-foreground: #FFFFFF;
-  --success: #16A34A;
+  --success: #10B981;
   --success-foreground: #FFFFFF;
-  --warning: #D97706;
+  --warning: #F59E0B;
   --warning-foreground: #FFFFFF;
-  --info: #0284C7;
+  --info: #0EA5E9;
   --info-foreground: #FFFFFF;
 
-  --frontend: #7C3AED;
+  --frontend: #8B5CF6;
   --backend: #2563EB;
-  --database: #059669;
-  --lead: #D97706;
+  --database: #10B981;
+  --lead: #F59E0B;
 
-  --border: #E2E4EA;
-  --border-strong: #CBD0D9;
+  --border: #E2E8F0;
+  --border-strong: #CBD5E1;
   --input: #FFFFFF;
   --ring: #2563EB;
 
   --chart-1: #2563EB;
-  --chart-2: #059669;
-  --chart-3: #D97706;
-  --chart-4: #0284C7;
-  --chart-5: #DC2626;
+  --chart-2: #10B981;
+  --chart-3: #F59E0B;
+  --chart-4: #0EA5E9;
+  --chart-5: #EF4444;
 
-  --sidebar: #F4F6F9;
-  --sidebar-foreground: #090D14;
+  --sidebar: #F8FAFC;
+  --sidebar-foreground: #0F172A;
   --sidebar-primary: #2563EB;
   --sidebar-primary-foreground: #FFFFFF;
-  --sidebar-accent: #E8ECF2;
-  --sidebar-accent-foreground: #090D14;
-  --sidebar-border: #E2E4EA;
+  --sidebar-accent: #F1F5F9;
+  --sidebar-accent-foreground: #0F172A;
+  --sidebar-border: #E2E8F0;
   --sidebar-ring: #2563EB;
 }
 

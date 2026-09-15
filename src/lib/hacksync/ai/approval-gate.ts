@@ -16,7 +16,7 @@
  *   8. Cryptographic diff hash matching
  */
 
-import { createHash } from "crypto";
+import { computeSha256Sync, computeSha256Async } from "@/lib/security/universal-hash";
 import { supabase } from "@/integrations/supabase/client";
 import { AuthorizationError, AuthenticationError, ExternalServiceError } from "@/lib/errors";
 import { verifyProjectMembership } from "@/lib/security/tenant-verifier";
@@ -60,20 +60,14 @@ const MUTATING_TOOLS = new Set([
  * Computes a cryptographically strong SHA-256 hash of a code diff.
  */
 export async function computeDiffHash(diff: string): Promise<string> {
-  if (!diff) return "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"; // SHA-256 of empty string
-  const encoder = new TextEncoder();
-  const data = encoder.encode(diff);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+  return computeSha256Async(diff);
 }
 
 /**
  * Deterministic synchronous SHA-256 hash helper for synchronous execution contexts.
  */
 export function computeDiffHashSync(diff: string): string {
-  if (!diff) return "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
-  return createHash("sha256").update(diff).digest("hex");
+  return computeSha256Sync(diff);
 }
 
 /**

@@ -4,7 +4,7 @@
  * and cryptographic SHA-256 base-state and diff hashes.
  */
 
-import { createHash } from "crypto";
+import { computeSha256Sync } from "@/lib/security/universal-hash";
 import type { Patch, PatchFile } from "./fix-types";
 
 export class PatchGenerator {
@@ -12,7 +12,7 @@ export class PatchGenerator {
    * Computes a SHA-256 hash for a given string content.
    */
   static sha256(content: string): string {
-    return createHash("sha256").update(content || "").digest("hex");
+    return computeSha256Sync(content || "");
   }
 
   /**

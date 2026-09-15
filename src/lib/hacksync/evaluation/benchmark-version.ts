@@ -4,7 +4,7 @@
  * Two identical benchmark datasets or configurations must produce the exact same hash.
  */
 
-import { createHash } from "crypto";
+import { computeSha256Sync } from "@/lib/security/universal-hash";
 
 export interface BenchmarkVersion {
   version: string;
@@ -50,7 +50,7 @@ export class BenchmarkVersionManager {
    */
   static computeDatasetHash(dataset: unknown): string {
     const canonical = this.canonicalSerialize(dataset);
-    return createHash("sha256").update(canonical, "utf8").digest("hex");
+    return computeSha256Sync(canonical);
   }
 
   /**
@@ -65,7 +65,7 @@ export class BenchmarkVersionManager {
     options?: Record<string, unknown> | undefined;
   }): string {
     const canonical = this.canonicalSerialize(config);
-    return createHash("sha256").update(canonical, "utf8").digest("hex");
+    return computeSha256Sync(canonical);
   }
 
   /**

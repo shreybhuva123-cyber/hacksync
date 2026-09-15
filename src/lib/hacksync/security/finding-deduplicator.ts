@@ -3,7 +3,7 @@
  * Phase 3 Production Standard
  */
 
-import { createHash } from "node:crypto";
+import { computeSha256Sync } from "@/lib/security/universal-hash";
 import type { SecurityFinding } from "./finding-types";
 
 export class FindingDeduplicator {
@@ -23,7 +23,7 @@ export class FindingDeduplicator {
     const normEvidence = params.evidence.replace(/\s+/g, " ").trim();
     const payload = `${params.projectId}:${normFile}:${params.ruleId}:${params.startLine}-${params.endLine}:${normEvidence}`;
 
-    return createHash("sha256").update(payload, "utf8").digest("hex");
+    return computeSha256Sync(payload);
   }
 
   /**
