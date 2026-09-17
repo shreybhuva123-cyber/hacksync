@@ -5,6 +5,7 @@ import {
   Bot,
   Boxes,
   ChevronDown,
+  Clock,
   Database,
   FileCode2,
   FolderKanban,
@@ -45,7 +46,7 @@ import type { Role } from "@/lib/hacksync/types";
 import { RoleBadge, StatusPill } from "./primitives";
 import { AiCopilotModal } from "./AiCopilotModal";
 import { CommandPalette } from "./CommandPalette";
-import { InviteTeammatesModal } from "@/components/projects/InviteTeammatesModal";
+import { InviteTeammatesModal, InvitationRequestsModal } from "@/components/projects/InviteTeammatesModal";
 import { JoinProjectModal } from "@/components/projects/JoinProjectModal";
 import { joinRequestsService } from "@/lib/services/join-requests.service";
 import { TopTimerWidget } from "@/components/timer";
@@ -55,7 +56,8 @@ interface NavItem {
   to: string;
   label: string;
   icon: typeof LayoutDashboard;
-  badge?: string | number | undefined;
+  badge?: number | string | undefined;
+  alert?: boolean | undefined;
 }
 
 interface NavGroup {
@@ -69,6 +71,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [commandOpen, setCommandOpen] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [joinOpen, setJoinOpen] = useState(false);
+  const [requestsOpen, setRequestsOpen] = useState(false);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -166,6 +169,8 @@ export function AppShell({ children }: { children: ReactNode }) {
     },
   ];
 
+  const pendingRequestsCount = ws?.joinRequests?.filter((r) => r.status === "pending").length ?? 0;
+
   return (
     <div className="min-h-screen bg-background">
       {/* Sidebar */}
@@ -198,7 +203,11 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
 
         {/* Project Switcher */}
-        <ProjectSwitcher onOpenJoin={() => setJoinOpen(true)} />
+        <ProjectSwitcher
+          onOpenJoin={() => setJoinOpen(true)}
+          onOpenRequests={() => setRequestsOpen(true)}
+          pendingRequestsCount={pendingRequestsCount}
+        />
 
         <nav className="flex-1 overflow-y-auto px-2.5 py-3">
           {navGroups.map((section) => (
@@ -240,6 +249,24 @@ export function AppShell({ children }: { children: ReactNode }) {
         </nav>
 
         <div className="border-t border-sidebar-border p-3">
+          {ws ? (
+            <button
+              type="button"
+              onClick={() => setRequestsOpen(true)}
+              className="mb-3 flex w-full items-center justify-between rounded-[6px] border border-border bg-surface px-2.5 py-1.5 text-[13px] text-foreground transition-colors hover:bg-surface-raised"
+            >
+              <div className="flex items-center gap-2">
+                <Clock className="size-4 text-primary" />
+                <span>Invitation Requests</span>
+              </div>
+              {pendingRequestsCount > 0 ? (
+                <span className="flex size-5 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
+                  {pendingRequestsCount}
+                </span>
+              ) : null}
+            </button>
+          ) : null}
+
           <div className="rounded-[8px] border border-border bg-surface p-3">
             <div className="flex items-center justify-between">
               <span className="text-[11px] text-muted-foreground font-medium">Health Score</span>
@@ -444,6 +471,15 @@ export function AppShell({ children }: { children: ReactNode }) {
         />
       ) : null}
 
+      {/* Invitation Requests Modal */}
+      {ws ? (
+        <InvitationRequestsModal
+          isOpen={requestsOpen}
+          onClose={() => setRequestsOpen(false)}
+          workspace={ws}
+        />
+      ) : null}
+
       {/* Join Project Modal */}
       <JoinProjectModal
         isOpen={joinOpen}
@@ -457,7 +493,15 @@ export function AppShell({ children }: { children: ReactNode }) {
 
 // ─── Project Switcher ──────────────────────────────────────────────────
 
-function ProjectSwitcher({ onOpenJoin }: { onOpenJoin?: () => void }) {
+function ProjectSwitcher({
+  onOpenJoin,
+  onOpenRequests,
+  pendingRequestsCount = 0,
+}: {
+  onOpenJoin?: () => void;
+  onOpenRequests?: () => void;
+  pendingRequestsCount?: number;
+}) {
   const [dropOpen, setDropOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const { data: ws } = useWorkspace();
@@ -523,6 +567,26 @@ function ProjectSwitcher({ onOpenJoin }: { onOpenJoin?: () => void }) {
             </button>
           ))}
           <div className="border-t border-border mt-1 pt-1 space-y-0.5">
+            {onOpenRequests ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setDropOpen(false);
+                  onOpenRequests();
+                }}
+                className="flex w-full items-center justify-between px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-surface-raised hover:text-foreground"
+              >
+                <div className="flex items-center gap-2">
+                  <Clock className="size-3 text-primary" />
+                  <span>Invitation Requests</span>
+                </div>
+                {pendingRequestsCount > 0 ? (
+                  <span className="flex size-4 items-center justify-center rounded-full bg-primary text-[9px] font-bold text-primary-foreground">
+                    {pendingRequestsCount}
+                  </span>
+                ) : null}
+              </button>
+            ) : null}
             {onOpenJoin ? (
               <button
                 type="button"

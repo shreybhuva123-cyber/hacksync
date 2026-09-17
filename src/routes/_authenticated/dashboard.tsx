@@ -6,6 +6,7 @@ import {
   ArrowRight,
   Boxes,
   CheckCircle2,
+  Clock,
   FileCode2,
   Gauge,
   GitBranch,
@@ -20,6 +21,8 @@ import {
   Users,
   Zap,
 } from "lucide-react";
+import { useAuth } from "@/hooks/useAuth";
+import { InvitationRequestsModal } from "@/components/projects/InvitationRequestsModal";
 import { WorkspaceView } from "@/components/hacksync/WorkspaceView";
 import {
   Bar,
@@ -64,6 +67,9 @@ function DashboardPage() {
 }
 
 function DashboardBody({ ws }: { ws: Workspace }) {
+  const { user } = useAuth();
+  const [requestsModalOpen, setRequestsModalOpen] = useState(false);
+
   const readiness = computeReadiness(ws);
   const warnings = computeWarnings(ws);
   const critical = warnings.filter((w) => w.severity === "critical");
@@ -73,14 +79,106 @@ function DashboardBody({ ws }: { ws: Workspace }) {
   const cyberAudit = useMemo(() => auditWorkspaceSecurity(ws), [ws]);
   const cyberThreatsCount = cyberAudit.summary.critical + cyberAudit.summary.high;
 
+  // Derive current user's display name and member record
+  const callerMember = ws.members.find((m) => m.user_id === user?.id);
+  const isOwner = ws.project.created_by === user?.id;
+  const userRole = callerMember?.role ?? (isOwner ? "owner" : "member");
+  const userDisplayName: string =
+    (user?.user_metadata?.["display_name"] as string | undefined) ||
+    (user?.user_metadata?.["full_name"] as string | undefined) ||
+    callerMember?.display_name ||
+    user?.email?.split("@")[0] ||
+    "Developer";
+
+  // Pending join requests
+  const pendingRequests = (ws.joinRequests || []).filter((r) => r.status === "pending");
+  const canReview = userRole === "owner" || userRole === "lead" || isOwner;
+
   return (
     <>
+      {/* User Welcome & Workspace Identity Header */}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card/60 p-4 shadow-sm backdrop-blur-sm">
+        <div className="flex items-center gap-3">
+          <div className="flex size-10 items-center justify-center rounded-full border border-primary/20 bg-primary/10 text-sm font-bold text-primary">
+            {userDisplayName.charAt(0).toUpperCase()}
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-bold text-foreground sm:text-base">
+                Welcome back, {userDisplayName}!
+              </h2>
+              <RoleBadge role={userRole} />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {user?.email || "Authenticated HackSync Developer"} • Workspace: {ws.project.name}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {/* Invitation Requests Button */}
+          <button
+            type="button"
+            onClick={() => setRequestsModalOpen(true)}
+            className="relative flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-xs font-semibold text-foreground shadow-sm transition-colors hover:bg-accent"
+            title="View incoming team join requests and manage invitations"
+          >
+            <Clock className="size-3.5 text-primary" />
+            <span>Invitation Requests</span>
+            {pendingRequests.length > 0 && (
+              <span className="flex size-5 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
+                {pendingRequests.length}
+              </span>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* Leader Review Alert Banner if pending requests exist */}
+      {canReview && pendingRequests.length > 0 && (
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/30 bg-primary/10 p-3.5 text-xs text-foreground animate-in fade-in">
+          <div className="flex items-center gap-2.5">
+            <span className="flex size-7 items-center justify-center rounded-lg bg-primary/20 text-primary">
+              <Users className="size-4" />
+            </span>
+            <div>
+              <span className="font-semibold text-foreground">
+                {pendingRequests.length} pending team join request{pendingRequests.length > 1 ? "s" : ""}
+              </span>
+              <p className="text-[11px] text-muted-foreground">
+                Teammates are requesting to join this workspace. Review applicants and assign their official roles.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setRequestsModalOpen(true)}
+            className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90"
+          >
+            Review Requests
+          </button>
+        </div>
+      )}
+
       <PageHeader
         eyebrow="Repository Intelligence"
         title={ws.project.name}
         description={ws.project.description ?? "Engineering control center integrating AST intelligence, security audits, and verification."}
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setRequestsModalOpen(true)}
+              className="flex items-center gap-1.5 rounded-[6px] border border-border bg-surface px-3 py-1.5 text-xs font-medium text-foreground hover:bg-surface-raised transition-colors"
+            >
+              <Clock className="size-3.5 text-primary" />
+              <span>Invitations</span>
+              {pendingRequests.length > 0 && (
+                <span className="rounded-full bg-primary/20 px-1.5 py-0.5 text-[10px] font-bold text-primary">
+                  {pendingRequests.length}
+                </span>
+              )}
+            </button>
             <Link
               to="/security"
               className="flex items-center gap-1.5 rounded-[6px] border border-border bg-surface px-3 py-1.5 text-xs font-medium text-foreground hover:bg-surface-raised transition-colors"
@@ -314,6 +412,12 @@ function DashboardBody({ ws }: { ws: Workspace }) {
           </Panel>
         </div>
       </div>
+
+      <InvitationRequestsModal
+        isOpen={requestsModalOpen}
+        onClose={() => setRequestsModalOpen(false)}
+        workspace={ws}
+      />
     </>
   );
 }

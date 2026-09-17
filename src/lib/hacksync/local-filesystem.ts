@@ -293,6 +293,26 @@ export async function pickDirectoryViaInput(): Promise<{ name: string; files: Sc
  * if unavailable, empty, or blocked by privacy shields (Brave/Firefox),
  * seamlessly opens standard HTML5 directory picker.
  */
+export async function ensureWritePermission(
+  handle: FileSystemHandle,
+): Promise<boolean> {
+  try {
+    const handleWithPerms = handle as any;
+    if (typeof handleWithPerms.queryPermission === "function") {
+      const status = await handleWithPerms.queryPermission({ mode: "readwrite" });
+      if (status === "granted") return true;
+    }
+    if (typeof handleWithPerms.requestPermission === "function") {
+      const status = await handleWithPerms.requestPermission({ mode: "readwrite" });
+      return status === "granted";
+    }
+    return true;
+  } catch (err) {
+    console.warn("Could not query/request readwrite permission:", err);
+    return false;
+  }
+}
+
 export async function pickDirectoryUniversal(): Promise<{
   handle: FileSystemDirectoryHandle | null;
   name: string;
@@ -303,17 +323,20 @@ export async function pickDirectoryUniversal(): Promise<{
     try {
       const picked = await pickLocalDirectory();
       if (picked) {
-        const files = await scanLocalDirectory(picked.handle);
-        if (files.length > 0) {
-          saveStoredDirectoryState({
-            connected: true,
-            name: picked.name,
-            fileCount: files.length,
-            lastSyncedAt: new Date().toISOString(),
-            autoSync: true,
-          });
-          return { handle: picked.handle, name: picked.name, files };
+        let files: ScannedFile[] = [];
+        try {
+          files = await scanLocalDirectory(picked.handle);
+        } catch {
+          // Empty or new directories may have 0 files
         }
+        saveStoredDirectoryState({
+          connected: true,
+          name: picked.name,
+          fileCount: files.length,
+          lastSyncedAt: new Date().toISOString(),
+          autoSync: true,
+        });
+        return { handle: picked.handle, name: picked.name, files };
       }
     } catch (err) {
       if ((err as Error).name === "AbortError") return null;
@@ -321,9 +344,9 @@ export async function pickDirectoryUniversal(): Promise<{
     }
   }
 
-  // 2. HTML5 Directory Input Fallback (Works 100% in Brave, Firefox, Chrome, Safari)
+  // 2. HTML5 Directory Input Fallback (Works in Brave, Firefox, Chrome, Safari)
   const inputResult = await pickDirectoryViaInput();
-  if (inputResult && inputResult.files.length > 0) {
+  if (inputResult) {
     saveStoredDirectoryState({
       connected: true,
       name: inputResult.name,
@@ -338,7 +361,7 @@ export async function pickDirectoryUniversal(): Promise<{
     };
   }
 
-  return inputResult ? { handle: null, name: inputResult.name, files: [] } : null;
+  return null;
 }
 
 /**
@@ -778,19 +801,41 @@ export async function exportWorkspaceToZip(
 export async function syncWorkspaceFilesToLocalDisk(
   dirHandle: FileSystemDirectoryHandle,
   nodes: CodeNode[],
-): Promise<{ written: number; failed: number }> {
-  const fileNodes = nodes.filter((n) => n.kind === "file");
+): Promise<{ written: number; failed: number; errors: string[] }> {
+  // Ensure write permission before starting
+  const hasPerm = await ensureWritePermission(dirHandle);
+  if (!hasPerm) {
+    throw new Error("Local folder write permission was not granted by your browser.");
+  }
+
+  const fileNodes = nodes.filter(
+    (n) => n.kind === "file" && n.path && n.path.trim().length > 0,
+  );
   let written = 0;
   let failed = 0;
+  const errors: string[] = [];
 
   for (const node of fileNodes) {
     const content = node.content ?? "";
-    const ok = await writeNestedFileByPath(dirHandle, node.path, content);
-    if (ok) written++;
-    else failed++;
+    const cleanPath = node.path.replace(/\\/g, "/").replace(/^\/+/, "");
+    if (!cleanPath) continue;
+
+    const ok = await writeNestedFileByPath(dirHandle, cleanPath, content);
+    if (ok) {
+      written++;
+    } else {
+      failed++;
+      errors.push(cleanPath);
+    }
   }
 
-  return { written, failed };
+  saveStoredDirectoryState({
+    connected: true,
+    fileCount: written,
+    lastSyncedAt: new Date().toISOString(),
+  });
+
+  return { written, failed, errors };
 }
 
 /**

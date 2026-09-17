@@ -26,6 +26,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
+import { toast } from "sonner";
 import { WorkspaceView } from "@/components/hacksync/WorkspaceView";
 import {
   PageHeader,
@@ -349,11 +350,14 @@ function CodeBody({ ws }: { ws: Workspace }) {
   // Push All to Disk
   const handlePushAllToDisk = async () => {
     let handle = getActiveDirectoryHandle();
+    let folderName = localDir.name || "Local Folder";
+
     if (!handle) {
       try {
         const res = await pickDirectoryUniversal();
         if (res?.handle) {
           handle = res.handle;
+          folderName = res.name;
           setActiveDirectoryHandle(res.handle);
           const state: LocalDirectoryState = {
             connected: true,
@@ -364,6 +368,11 @@ function CodeBody({ ws }: { ws: Workspace }) {
           };
           setLocalDir(state);
           saveStoredDirectoryState(state);
+        } else if (res && !res.handle) {
+          // Browser lacks native directory write permission (e.g. Firefox/Safari)
+          toast.info("Browser lacks direct disk write API. Downloading complete project as ZIP archive instead!");
+          await handleDownloadZip();
+          return;
         }
       } catch (err) {
         console.warn("Folder picker error during push to disk:", err);
@@ -371,19 +380,36 @@ function CodeBody({ ws }: { ws: Workspace }) {
     }
 
     if (!handle) {
-      setSyncFeedback("Connect a local folder first to push files to disk.");
+      setSyncFeedback("Select a local folder to push workspace files to your disk.");
       setTimeout(() => setSyncFeedback(null), 4000);
       return;
     }
 
     try {
       setIsSyncing(true);
+      const totalFiles = displayNodes.filter((n) => n.kind === "file").length;
+      setSyncFeedback(`Syncing ${totalFiles} files to "${folderName}" on disk...`);
       const res = await syncWorkspaceFilesToLocalDisk(handle, displayNodes);
-      setSyncFeedback(`Pushed ${res.written} files to "${localDir.name}" on your disk!`);
-      setTimeout(() => setSyncFeedback(null), 4000);
+
+      if (res.written > 0) {
+        const successMsg = `Successfully synced ${res.written} files to "${folderName}" on your local disk!`;
+        setSyncFeedback(successMsg);
+        toast.success(successMsg);
+        void logActivity(
+          ws.project.id,
+          "code",
+          `Pushed ${res.written} files to local folder "${folderName}"`,
+        );
+      } else {
+        setSyncFeedback("0 files written. Please check folder write permissions.");
+      }
+      setTimeout(() => setSyncFeedback(null), 5000);
     } catch (err) {
-      setSyncFeedback("Failed to write files to disk.");
-      setTimeout(() => setSyncFeedback(null), 3500);
+      console.error("Local disk push error:", err);
+      const errorMsg = err instanceof Error ? err.message : "Failed to write files to disk.";
+      setSyncFeedback(errorMsg);
+      toast.error(errorMsg);
+      setTimeout(() => setSyncFeedback(null), 4000);
     } finally {
       setIsSyncing(false);
     }

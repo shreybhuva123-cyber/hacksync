@@ -132,26 +132,59 @@ export const projectsService = {
    */
   async joinProject(input: JoinProjectInput): Promise<Project> {
     const validated = joinProjectSchema.parse(input);
+    const cleanCode = validated.inviteCode.trim().toUpperCase();
     const joinRole = validated.role === "owner" ? "member" : validated.role;
 
     // Call secure RPC directly to bypass RLS blocks
-    const { data: project, error: joinErr } = await (supabase.rpc as any)("join_project_by_code", {
-      p_invite_code: validated.inviteCode,
-      p_display_name: validated.displayName,
+    const { data: rpcRes, error: joinErr } = await (supabase.rpc as any)("join_project_by_code", {
+      p_invite_code: cleanCode,
+      p_display_name: validated.displayName.trim(),
       p_role: joinRole,
     });
 
-    if (joinErr) throw new DatabaseError(joinErr.message, joinErr);
-    if (!project) throw new NotFoundError("Project not found or invalid invite code");
+    if (joinErr) {
+      if (joinErr.code === "P0002" || joinErr.message?.includes("Invalid invite code")) {
+        throw new NotFoundError(`No project found with invite code "${cleanCode}". Please verify the code with your team lead.`);
+      }
+      throw new DatabaseError(joinErr.message, joinErr);
+    }
 
-    await supabase.from("activity_events").insert({
-      project_id: project.id,
-      kind: "member",
-      actor: validated.displayName,
-      actor_role: joinRole,
-      message: `Joined project as ${validated.role} engineer`,
-    });
+    const projectId = rpcRes?.project?.id || rpcRes?.id;
+    const projectName = rpcRes?.project?.name || rpcRes?.name;
 
-    return project as Project;
+    if (!projectId) {
+      throw new NotFoundError(`No project found matching invite code "${cleanCode}".`);
+    }
+
+    // Now that user is in project_members, RLS allows reading the project row
+    const { data: projectRow } = await supabase
+      .from("projects")
+      .select("*")
+      .eq("id", projectId)
+      .maybeSingle();
+
+    try {
+      await supabase.from("activity_events").insert({
+        project_id: projectId,
+        kind: "member",
+        actor: validated.displayName,
+        actor_role: joinRole,
+        message: `Joined project as ${validated.role} engineer`,
+      });
+    } catch {
+      // Non-blocking
+    }
+
+    return (
+      (projectRow as Project) ||
+      ({
+        id: projectId,
+        name: projectName || "Project",
+        invite_code: cleanCode,
+        created_by: "",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      } as Project)
+    );
   },
 };

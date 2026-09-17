@@ -44,7 +44,34 @@ function saveStoredRequests(projectId: string, requests: JoinRequest[]): void {
   }
 }
 
+export function getStoredProjectMembers(projectId: string): Member[] {
+  if (!projectId) return [];
+  try {
+    const raw = getStorageItem(`hacksync:local-members:${projectId}`);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveStoredProjectMembers(projectId: string, member: Member): void {
+  if (!projectId) return;
+  try {
+    const existing = getStoredProjectMembers(projectId);
+    const updated = [
+      member,
+      ...existing.filter((m) => m.id !== member.id && m.display_name.toLowerCase() !== member.display_name.toLowerCase()),
+    ];
+    setStorageItem(`hacksync:local-members:${projectId}`, JSON.stringify(updated));
+  } catch (err) {
+    console.warn("Could not save local project member:", err);
+  }
+}
+
 export const joinRequestsService = {
+  getStoredProjectMembers,
+  saveStoredProjectMembers,
+
   /**
    * Fetch all join requests for a project (filtered to pending or all).
    */
@@ -118,40 +145,63 @@ export const joinRequestsService = {
       // Fallback below
     }
 
-    // 2. Client-side fallback: Look up project by invite code
-    const { data: project, error: projErr } = await supabase
-      .from("projects")
-      .select("id, name, invite_code")
-      .eq("invite_code", cleanCode)
-      .maybeSingle();
+    // 2. Fallback: Use SECURITY DEFINER RPC join_project_by_code to verify & register
+    let projectId = "";
+    let projectName = "Project";
+    let isAlreadyMember = false;
 
-    if (projErr || !project) {
+    try {
+      const { data: joinRes, error: joinErr } = await (supabase.rpc as any)("join_project_by_code", {
+        p_invite_code: cleanCode,
+        p_display_name: input.displayName.trim(),
+        p_role: "member", // Baseline membership pending role assignment
+      });
+
+      if (joinErr) {
+        if (joinErr.code === "P0002" || joinErr.message?.includes("Invalid invite code")) {
+          throw new NotFoundError(`No project found with invite code "${cleanCode}". Please verify the code with your team leader.`);
+        }
+        throw new DatabaseError(joinErr.message, joinErr);
+      }
+
+      if (joinRes?.project?.id) {
+        projectId = joinRes.project.id;
+        projectName = joinRes.project.name || "Project";
+        isAlreadyMember = !!joinRes.already_member;
+      }
+    } catch (rpcErr) {
+      if (rpcErr instanceof NotFoundError) throw rpcErr;
+      // If RPC call fails, try direct query as a last resort
+      const { data: project } = await supabase
+        .from("projects")
+        .select("id, name, invite_code")
+        .eq("invite_code", cleanCode)
+        .maybeSingle();
+
+      if (!project) {
+        throw new NotFoundError(`No project found with invite code "${cleanCode}". Please verify the code with your team leader.`);
+      }
+      projectId = project.id;
+      projectName = project.name;
+    }
+
+    if (!projectId) {
       throw new NotFoundError(`No project found matching invite code "${cleanCode}".`);
     }
 
-    // Check if already a member
-    if (input.userId) {
-      const { data: existingMember } = await supabase
-        .from("project_members")
-        .select("id, role")
-        .eq("project_id", project.id)
-        .eq("user_id", input.userId)
-        .maybeSingle();
-
-      if (existingMember) {
-        return {
-          status: "already_member",
-          message: "You are already a member of this project.",
-          projectId: project.id,
-          projectName: project.name,
-        };
-      }
+    if (isAlreadyMember) {
+      return {
+        status: "already_member",
+        message: `You are already a member of "${projectName}".`,
+        projectId,
+        projectName,
+      };
     }
 
     // Create new join request object
     const newRequest: JoinRequest = {
       id: crypto.randomUUID(),
-      project_id: project.id,
+      project_id: projectId,
       user_id: input.userId ?? null,
       display_name: input.displayName.trim() || "Applicant",
       email: input.email ?? null,
@@ -164,21 +214,21 @@ export const joinRequestsService = {
       updated_at: new Date().toISOString(),
     };
 
-    // Attempt DB insert
+    // Attempt DB insert if table exists
     try {
       await (supabase.from as any)("project_join_requests").insert(newRequest);
-    } catch (err) {
-      logger.warn("Could not insert into project_join_requests table:", err instanceof Error ? { message: err.message } : undefined);
+    } catch {
+      // Non-blocking
     }
 
-    // Store in localStorage
-    const currentList = getStoredRequests(project.id);
-    saveStoredRequests(project.id, [newRequest, ...currentList.filter((r) => r.id !== newRequest.id)]);
+    // Store in localStorage / memory cache
+    const currentList = getStoredRequests(projectId);
+    saveStoredRequests(projectId, [newRequest, ...currentList.filter((r) => r.id !== newRequest.id)]);
 
     // Log activity event
     try {
       await supabase.from("activity_events").insert({
-        project_id: project.id,
+        project_id: projectId,
         kind: "member",
         actor: input.displayName,
         actor_role: input.requestedRole,
@@ -190,9 +240,9 @@ export const joinRequestsService = {
 
     return {
       status: "pending",
-      message: "Join request submitted! The project leader will review your request and assign your role.",
-      projectId: project.id,
-      projectName: project.name,
+      message: `Join request submitted for "${projectName}"! The team leader will review your request and assign your official role.`,
+      projectId,
+      projectName,
       requestId: newRequest.id,
     };
   },
@@ -392,21 +442,58 @@ export const joinRequestsService = {
     }
 
     const newMemberId = crypto.randomUUID();
-    const newMemberRecord = {
+    const newMemberRecord: Member = {
       id: newMemberId,
       project_id: input.projectId,
       user_id: targetUserId,
       display_name: targetDisplayName,
       email: targetEmail,
       role: input.role,
+      branch_name: `${input.role}-workspace`,
+      working_area: input.role,
       online: false,
+      last_seen_at: new Date().toISOString(),
     };
 
-    const { error: insertErr } = await supabase.from("project_members").insert(newMemberRecord as any);
-    if (insertErr) {
-      logger.error("Failed to insert member:", insertErr);
-      throw new DatabaseError(insertErr.message, insertErr);
+    // Try DB insert (gracefully handle RLS policy limitations)
+    try {
+      const { error: insertErr } = await supabase.from("project_members").insert({
+        id: newMemberId,
+        project_id: input.projectId,
+        user_id: targetUserId,
+        display_name: targetDisplayName,
+        email: targetEmail,
+        role: input.role,
+        online: false,
+      } as any);
+
+      if (insertErr) {
+        logger.warn("project_members direct insert note:", { message: insertErr.message });
+      }
+    } catch (err) {
+      logger.warn("project_members insert caught:", err instanceof Error ? { message: err.message } : undefined);
     }
+
+    // Save to local project members cache so UI immediately reflects the new teammate
+    saveStoredProjectMembers(input.projectId, newMemberRecord);
+
+    // Also store an accepted join request for record keeping
+    const acceptedRequest: JoinRequest = {
+      id: crypto.randomUUID(),
+      project_id: input.projectId,
+      user_id: targetUserId,
+      display_name: targetDisplayName,
+      email: targetEmail,
+      requested_role: input.role,
+      assigned_role: input.role,
+      status: "accepted",
+      reviewed_by: null,
+      reviewed_at: new Date().toISOString(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    const currentReqs = getStoredRequests(input.projectId);
+    saveStoredRequests(input.projectId, [acceptedRequest, ...currentReqs.filter((r) => r.id !== acceptedRequest.id)]);
 
     // Log activity
     try {

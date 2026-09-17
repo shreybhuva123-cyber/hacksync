@@ -30,17 +30,25 @@ interface InviteTeammatesModalProps {
   isOpen: boolean;
   onClose: () => void;
   workspace: Workspace;
+  initialTab?: "link" | "direct" | "requests";
 }
 
 export function InviteTeammatesModal({
   isOpen,
   onClose,
   workspace,
+  initialTab = "link",
 }: InviteTeammatesModalProps) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [copiedLink, setCopiedLink] = useState(false);
-  const [activeTab, setActiveTab] = useState<"link" | "direct" | "requests">("link");
+  const [activeTab, setActiveTab] = useState<"link" | "direct" | "requests">(initialTab);
+
+  useEffect(() => {
+    if (isOpen) {
+      setActiveTab(initialTab);
+    }
+  }, [isOpen, initialTab]);
 
   // Direct add state
   const [identifier, setIdentifier] = useState("");
@@ -544,3 +552,23 @@ export function InviteTeammatesModal({
     </div>
   );
 }
+
+export function InvitationRequestsModal({
+  isOpen,
+  onClose,
+  workspace,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  workspace: Workspace;
+}) {
+  return (
+    <InviteTeammatesModal
+      isOpen={isOpen}
+      onClose={onClose}
+      workspace={workspace}
+      initialTab="requests"
+    />
+  );
+}
+

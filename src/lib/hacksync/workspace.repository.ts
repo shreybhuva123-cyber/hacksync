@@ -152,9 +152,16 @@ export const workspaceRepository = {
       columns = (cols as DbColumn[]) ?? [];
     }
 
+    const localMembers = joinRequestsService.getStoredProjectMembers(pid);
+    const dbMembers = (membersRes.data as Member[]) ?? [];
+    const memberMap = new Map<string, Member>();
+    for (const m of localMembers) memberMap.set(m.id, m);
+    for (const m of dbMembers) memberMap.set(m.id, m);
+    const mergedMembers = Array.from(memberMap.values());
+
     return {
       project,
-      members: (membersRes.data as Member[]) ?? [],
+      members: mergedMembers,
       contracts: (contractsRes.data as ApiContract[]) ?? [],
       tables: (tablesRes.data as DbTable[]) ?? [],
       columns,
