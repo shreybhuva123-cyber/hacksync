@@ -1,6 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { DatabaseError, AuthorizationError, NotFoundError, logger } from "@/lib/errors";
 import { canManageMembers } from "@/lib/hacksync/permissions";
+import { generateUUID } from "@/lib/utils";
 import type { JoinRequest, JoinRequestStatus, Member, Role } from "@/lib/hacksync/types";
 
 // In-memory store fallback for environments without browser localStorage (e.g. Bun test runner, SSR)
@@ -200,7 +201,7 @@ export const joinRequestsService = {
 
     // Create new join request object
     const newRequest: JoinRequest = {
-      id: crypto.randomUUID(),
+      id: generateUUID(),
       project_id: projectId,
       user_id: input.userId ?? null,
       display_name: input.displayName.trim() || "Applicant",
@@ -304,7 +305,7 @@ export const joinRequestsService = {
     if (input.action === "accepted" && targetRequest) {
       // Insert into project_members
       const newMember: Partial<Member> = {
-        id: crypto.randomUUID(),
+        id: generateUUID(),
         project_id: input.projectId,
         user_id: targetRequest.user_id,
         display_name: targetRequest.display_name,
@@ -441,7 +442,7 @@ export const joinRequestsService = {
       // Ignore lookup errors
     }
 
-    const newMemberId = crypto.randomUUID();
+    const newMemberId = generateUUID();
     const newMemberRecord: Member = {
       id: newMemberId,
       project_id: input.projectId,
@@ -479,7 +480,7 @@ export const joinRequestsService = {
 
     // Also store an accepted join request for record keeping
     const acceptedRequest: JoinRequest = {
-      id: crypto.randomUUID(),
+      id: generateUUID(),
       project_id: input.projectId,
       user_id: targetUserId,
       display_name: targetDisplayName,

@@ -72,6 +72,7 @@ import {
 import { logActivity, useRowInsert, useRowMutation, useRowDelete } from "@/lib/hacksync/workspace";
 import { ROLES, ROLE_CONFIG, type Role } from "@/lib/constants/roles";
 import { supabase } from "@/integrations/supabase/client";
+import { generateUUID } from "@/lib/utils";
 import type { CodeNode, Workspace, MemberFile, FileSyncStatus, Area } from "@/lib/hacksync/types";
 
 export const Route = createFileRoute("/_authenticated/code")({
@@ -212,7 +213,7 @@ function CodeBody({ ws }: { ws: Workspace }) {
       const defaultRole = currentRole === "owner" ? "lead" : currentRole;
       const createdMembers: MemberFile[] = newFiles.map((f) => ({
         ...f,
-        id: crypto.randomUUID(),
+        id: generateUUID(),
         project_id: ws.project.id,
         user_id: user?.id ?? null,
         member_id: callerMember?.id ?? null,
@@ -236,7 +237,7 @@ function CodeBody({ ws }: { ws: Workspace }) {
 
       // 2. Also populate local CodeNodes for unified shared view
       const createdNodes: CodeNode[] = createdMembers.map((m) => ({
-        id: crypto.randomUUID(),
+        id: generateUUID(),
         project_id: ws.project.id,
         path: m.relative_path,
         parent_path: m.relative_path.includes("/")
